@@ -1,0 +1,550 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Work Time Tracker</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    #timer {
+      font-size: 2em;
+      margin: 20px 0;
+    }
+    .timer-controls {
+      margin: 2rem 0;
+    }
+    .manual-controls {
+      margin: 1.5rem 0;
+    }
+    .history-section {
+      background: #f8f9fa;
+      border-top: 1px solid #dee2e6;
+      margin-top: 3rem;
+      padding: 2rem 0;
+    }
+    .timeline-section {
+      margin: 2rem 0;
+      padding: 1.5rem;
+      background: white;
+      border-radius: 8px;
+      border: 1px solid #dee2e6;
+    }
+    .timeline-bar {
+      height: 30px;
+      background: #e9ecef;
+      border-radius: 4px;
+      position: relative;
+      margin: 1rem 0;
+    }
+    .timeline-segment {
+      position: absolute;
+      height: 100%;
+      background: #28a745;
+      border-radius: 4px;
+      transition: all 0.2s ease;
+    }
+    .timeline-labels {
+      display: flex;
+      position: relative;
+      font-size: 0.8rem;
+      color: #6c757d;
+      margin-bottom: 0.5rem;
+    }
+    .timeline-label {
+      position: absolute;
+      transform: translateX(-50%);
+      white-space: nowrap;
+    }
+    .timeline-tick {
+      position: absolute;
+      width: 1px;
+      height: 100%;
+      background: #6c757d;
+      top: 0;
+      transform: translateX(-0.5px);
+      opacity: 0.7;
+    }
+    .net-time {
+      font-size: 1.1rem;
+      font-weight: bold;
+    }
+    .net-time.positive {
+      color: #28a745;
+    }
+    .net-time.negative {
+      color: #dc3545;
+    }
+    .timeline-segment:hover {
+      background: #20c997 !important;
+      z-index: 10;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    }
+  </style>
+</head>
+<body class="bg-light">
+  <div class="container">
+    <div class="row justify-content-center">
+      <div class="col-md-8 col-lg-6">
+        <div class="text-center py-4">
+          <h1 class="display-4 mb-4">Work Time Tracker</h1>
+          <div id="timer" class="mb-4">00:00:00</div>
+          
+          <div class="timer-controls">
+            <button id="startPauseBtn" class="btn btn-primary btn-lg me-3">Start</button>
+            <button id="resetBtn" class="btn btn-outline-secondary">Reset</button>
+          </div>
+          
+          <div class="manual-controls">
+            <div class="input-group justify-content-center">
+              <input type="number" id="manualMinutes" class="form-control" placeholder="Minutes" style="max-width: 120px;">
+              <button onclick="adjustTime(true)" class="btn btn-outline-success">+ Minutes</button>
+              <button onclick="adjustTime(false)" class="btn btn-outline-danger">- Minutes</button>
+            </div>
+          </div>
+
+          <div class="timeline-section">
+            <h5>Today's Activity Timeline</h5>
+            <div class="timeline-labels">
+              <span>00:00</span>
+              <span>06:00</span>
+              <span>12:00</span>
+              <span>18:00</span>
+              <span>24:00</span>
+            </div>
+            <div class="timeline-bar" id="timelineBar"></div>
+            <div class="text-center mt-3">
+              <div>Net Manual Adjustments: <span id="netAdjustments" class="net-time">+00:00</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <footer class="history-section">
+    <div class="container">
+      <div class="row justify-content-center">
+        <div class="col-md-8 col-lg-6">
+          <div class="text-center">
+            <button class="btn btn-outline-secondary mb-3" type="button" data-bs-toggle="collapse" data-bs-target="#historyCollapse" aria-expanded="false" aria-controls="historyCollapse">
+              <span id="historyToggleText">Show History</span>
+              <i id="historyToggleIcon" class="ms-2">▼</i>
+            </button>
+          </div>
+          <div class="collapse" id="historyCollapse">
+            <h3 class="text-center mb-4">Last 7 Days</h3>
+            <ul id="historyList" class="list-group"></ul>
+          </div>
+        </div>
+      </div>
+    </div>
+  </footer>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  <script>
+    let startTime = null;
+    let elapsed = 0;
+    let timerInterval = null;
+    let netAdjustments = 0; // Track manual adjustments
+    const timerDisplay = document.getElementById('timer');
+    const startPauseBtn = document.getElementById('startPauseBtn');
+
+    function formatTime(seconds) {
+      const h = String(Math.floor(seconds / 3600)).padStart(2, '0');
+      const m = String(Math.floor((seconds % 3600) / 60)).padStart(2, '0');
+      const s = String(seconds % 60).padStart(2, '0');
+      return `${h}:${m}:${s}`;
+    }
+
+    function updateTimerDisplay() {
+      const currentElapsed = elapsed + (startTime ? Math.floor((Date.now() - startTime) / 1000) : 0);
+      timerDisplay.textContent = formatTime(currentElapsed);
+    }
+
+    function saveToStorage() {
+      const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+      let existing = {};
+      try {
+        existing = JSON.parse(localStorage.getItem("worktimes") || "{}");
+      } catch (e) {
+        existing = {};
+      }
+      const currentElapsed = elapsed + (startTime ? Math.floor((Date.now() - startTime) / 1000) : 0);
+      existing[today] = currentElapsed;
+      localStorage.setItem("worktimes", JSON.stringify(existing));
+      
+      // Save current state
+      const state = {
+        elapsed: elapsed,
+        isRunning: startTime !== null,
+        startTime: startTime,
+        date: today
+      };
+      localStorage.setItem("timerState", JSON.stringify(state));
+
+      // Save timeline and adjustments
+      saveTimelineData();
+      saveNetAdjustments();
+      
+      console.log("Saved to storage at", new Date().toLocaleTimeString());
+    }
+
+    function loadFromStorage() {
+      const today = new Date().toISOString().slice(0, 10);
+      const data = JSON.parse(localStorage.getItem("worktimes") || "{}");
+      elapsed = data[today] || 0;
+      
+      // Load timer state
+      try {
+        const state = JSON.parse(localStorage.getItem("timerState") || "{}");
+        if (state.date === today && state.isRunning) {
+          // Timer was running when the page was closed
+          // Continue the existing session with the original start time
+          // Don't add time to elapsed - let the normal calculation handle it
+          startTime = state.startTime;
+          elapsed = state.elapsed; // Keep the original elapsed time
+          timerInterval = setInterval(updateTimerDisplay, 1000);
+          startPauseBtn.textContent = 'Pause';
+        } else if (state.date === today) {
+          // Timer was paused
+          elapsed = state.elapsed;
+          startPauseBtn.textContent = 'Start';
+        } else {
+          // Different day, clear old state
+          localStorage.removeItem("timerState");
+          startPauseBtn.textContent = 'Start';
+        }
+      } catch (e) {
+        // If state loading fails, fall back to just the elapsed time
+        console.log("Failed to load timer state:", e);
+        startPauseBtn.textContent = 'Start';
+      }
+      
+      updateTimerDisplay();
+      loadNetAdjustments();
+      updateTimeline();
+    }
+
+    function showHistory() {
+      const historyList = document.getElementById("historyList");
+      historyList.innerHTML = "";
+      const data = JSON.parse(localStorage.getItem("worktimes") || "{}");
+      const today = new Date();
+      for (let i = 1; i <= 7; i++) { // Start from 1 to skip today
+        const date = new Date(today);
+        date.setDate(today.getDate() - i);
+        const key = date.toISOString().slice(0, 10);
+        const time = data[key] || 0;
+        const li = document.createElement("li");
+        li.className = "list-group-item d-flex justify-content-between align-items-center";
+        li.innerHTML = `
+          <span>${key}</span>
+          <span class="badge bg-primary rounded-pill">${formatTime(time)}</span>
+        `;
+        historyList.appendChild(li);
+      }
+    }
+
+    function saveTimelineData() {
+      const today = new Date().toISOString().slice(0, 10);
+      if (!startTime) return;
+      
+      let timelineData = {};
+      try {
+        timelineData = JSON.parse(localStorage.getItem("timelineData") || "{}");
+      } catch (e) {
+        timelineData = {};
+      }
+      
+      if (!timelineData[today]) {
+        timelineData[today] = [];
+      }
+      
+      // Add current session to timeline
+      const sessionStart = startTime;
+      const sessionEnd = Date.now();
+      timelineData[today].push({ start: sessionStart, end: sessionEnd });
+      
+      localStorage.setItem("timelineData", JSON.stringify(timelineData));
+    }
+
+    function saveNetAdjustments() {
+      const today = new Date().toISOString().slice(0, 10);
+      let adjustments = {};
+      try {
+        adjustments = JSON.parse(localStorage.getItem("netAdjustments") || "{}");
+      } catch (e) {
+        adjustments = {};
+      }
+      adjustments[today] = netAdjustments;
+      localStorage.setItem("netAdjustments", JSON.stringify(adjustments));
+    }
+
+    function loadNetAdjustments() {
+      const today = new Date().toISOString().slice(0, 10);
+      const adjustments = JSON.parse(localStorage.getItem("netAdjustments") || "{}");
+      netAdjustments = adjustments[today] || 0;
+      updateNetAdjustmentsDisplay();
+    }
+
+    function updateNetAdjustmentsDisplay() {
+      const netDisplay = document.getElementById('netAdjustments');
+      const hours = Math.floor(Math.abs(netAdjustments) / 3600);
+      const minutes = Math.floor((Math.abs(netAdjustments) % 3600) / 60);
+      const sign = netAdjustments >= 0 ? '+' : '-';
+      const timeStr = `${sign}${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+      
+      netDisplay.textContent = timeStr;
+      netDisplay.className = `net-time ${netAdjustments >= 0 ? 'positive' : 'negative'}`;
+    }
+
+    function updateTimeline() {
+      const today = new Date().toISOString().slice(0, 10);
+      const timelineBar = document.getElementById('timelineBar');
+      const timelineLabels = document.querySelector('.timeline-labels');
+      timelineBar.innerHTML = '';
+      timelineLabels.innerHTML = '';
+      
+      let timelineData = {};
+      try {
+        timelineData = JSON.parse(localStorage.getItem("timelineData") || "{}");
+      } catch (e) {
+        timelineData = {};
+      }
+      
+      const todayData = timelineData[today] || [];
+      
+      // If no data and not currently running, show default view
+      if (todayData.length === 0 && !startTime) {
+        // Default 24-hour view
+        const defaultHours = [0, 6, 12, 18, 24];
+        defaultHours.forEach((hour, index) => {
+          const percent = (index / (defaultHours.length - 1)) * 100;
+          const label = document.createElement('span');
+          label.className = 'timeline-label';
+          label.style.left = percent + '%';
+          label.textContent = `${String(hour).padStart(2, '0')}:00`;
+          timelineLabels.appendChild(label);
+        });
+        return;
+      }
+      
+      // Find the time range of actual activity
+      let earliestTime = startTime || Date.now();
+      let latestTime = startTime || Date.now();
+      
+      todayData.forEach(session => {
+        earliestTime = Math.min(earliestTime, session.start);
+        latestTime = Math.max(latestTime, session.end);
+      });
+      
+      if (startTime) {
+        latestTime = Math.max(latestTime, Date.now());
+      }
+      
+      // Convert to hours and determine hour boundaries
+      const dayStart = new Date(today + 'T00:00:00').getTime();
+      const earliestHour = Math.floor((earliestTime - dayStart) / (60 * 60 * 1000));
+      const latestHour = Math.ceil((latestTime - dayStart) / (60 * 60 * 1000));
+      
+      // Add buffer: 1 hour before first activity, 1 hour after last activity
+      const startHour = Math.max(0, earliestHour - 1);
+      const endHour = Math.min(24, latestHour + 1);
+      
+      // Timeline represents time from startHour:00 to endHour:00
+      const timelineStart = dayStart + (startHour * 60 * 60 * 1000);
+      const timelineEnd = dayStart + (endHour * 60 * 60 * 1000);
+      const timelineDuration = timelineEnd - timelineStart;
+      
+      // Create labels and ticks for every full hour
+      for (let hour = startHour; hour <= endHour; hour++) {
+        const hourTime = dayStart + (hour * 60 * 60 * 1000);
+        const percent = ((hourTime - timelineStart) / timelineDuration) * 100;
+        
+        // Create tick mark
+        const tick = document.createElement('div');
+        tick.className = 'timeline-tick';
+        tick.style.left = percent + '%';
+        timelineBar.appendChild(tick);
+        
+        // Create label
+        const label = document.createElement('span');
+        label.className = 'timeline-label';
+        label.style.left = percent + '%';
+        label.textContent = `${String(hour).padStart(2, '0')}:00`;
+        timelineLabels.appendChild(label);
+      }
+      
+      // Create segments only for periods when the timer was actually running
+      // Each completed session becomes a separate segment
+      todayData.forEach(session => {
+        if (session.end <= timelineStart || session.start >= timelineEnd) return;
+        
+        const sessionStart = Math.max(session.start, timelineStart);
+        const sessionEnd = Math.min(session.end, timelineEnd);
+        
+        if (sessionStart < sessionEnd) {
+          const leftPercent = ((sessionStart - timelineStart) / timelineDuration) * 100;
+          const widthPercent = ((sessionEnd - sessionStart) / timelineDuration) * 100;
+          
+          const segment = document.createElement('div');
+          segment.className = 'timeline-segment';
+          segment.style.left = leftPercent + '%';
+          segment.style.width = widthPercent + '%';
+          
+          // Add simple title tooltip
+          const startDate = new Date(sessionStart);
+          const endDate = new Date(sessionEnd);
+          const startTimeStr = startDate.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+          const endTimeStr = endDate.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+          const duration = Math.round((sessionEnd - sessionStart) / 60000); // duration in minutes
+          
+          segment.title = `${startTimeStr} - ${endTimeStr} (${duration} Min.)`;
+          segment.style.cursor = 'help';
+          
+          timelineBar.appendChild(segment);
+        }
+      });
+      
+      // Add current session if running
+      if (startTime) {
+        const currentStart = Math.max(startTime, timelineStart);
+        const currentEnd = Math.min(Date.now(), timelineEnd);
+        
+        if (currentStart < timelineEnd && currentEnd > timelineStart) {
+          const leftPercent = ((currentStart - timelineStart) / timelineDuration) * 100;
+          const widthPercent = ((currentEnd - currentStart) / timelineDuration) * 100;
+          
+          const segment = document.createElement('div');
+          segment.className = 'timeline-segment';
+          segment.style.left = leftPercent + '%';
+          segment.style.width = widthPercent + '%';
+          
+          // Add simple title tooltip for current session
+          const startDate = new Date(currentStart);
+          const currentDate = new Date(currentEnd);
+          const startTimeStr = startDate.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+          const currentTimeStr = currentDate.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+          const duration = Math.round((currentEnd - currentStart) / 60000); // duration in minutes
+          
+          segment.title = `${startTimeStr} - ${currentTimeStr} (${duration} Min.) - Läuft gerade`;
+          segment.style.cursor = 'help';
+          
+          timelineBar.appendChild(segment);
+        }
+      }
+    }
+
+    function createTimelineSegment(container, startSegment, endSegment, totalSegments) {
+      const segment = document.createElement('div');
+      segment.className = 'timeline-segment';
+      
+      const leftPercent = (startSegment / totalSegments) * 100;
+      const widthPercent = ((endSegment - startSegment + 1) / totalSegments) * 100;
+      
+      segment.style.left = leftPercent + '%';
+      segment.style.width = widthPercent + '%';
+      
+      container.appendChild(segment);
+    }
+
+    // Timer Controls
+    startPauseBtn.addEventListener('click', () => {
+      if (startTime) {
+        // Pause
+        saveTimelineData(); // Save timeline before pausing
+        elapsed += Math.floor((Date.now() - startTime) / 1000);
+        startTime = null;
+        clearInterval(timerInterval);
+        saveToStorage();
+        startPauseBtn.textContent = 'Start';
+        updateTimeline();
+      } else {
+        // Start
+        startTime = Date.now();
+        timerInterval = setInterval(() => {
+          updateTimerDisplay();
+        }, 1000);
+        startPauseBtn.textContent = 'Pause';
+        updateTimeline(); // Update timeline once when starting
+      }
+    });
+
+    document.getElementById('resetBtn').addEventListener('click', () => {
+      if (confirm("Reset today's time?")) {
+        if (startTime) {
+          saveTimelineData(); // Save current session before reset
+        }
+        startTime = null;
+        elapsed = 0;
+        netAdjustments = 0;
+        clearInterval(timerInterval);
+        updateTimerDisplay();
+        saveToStorage();
+        // Clear the timer state and timeline data
+        localStorage.removeItem("timerState");
+        const today = new Date().toISOString().slice(0, 10);
+        let timelineData = JSON.parse(localStorage.getItem("timelineData") || "{}");
+        delete timelineData[today];
+        localStorage.setItem("timelineData", JSON.stringify(timelineData));
+        let adjustments = JSON.parse(localStorage.getItem("netAdjustments") || "{}");
+        delete adjustments[today];
+        localStorage.setItem("netAdjustments", JSON.stringify(adjustments));
+        startPauseBtn.textContent = 'Start';
+        showHistory();
+        updateTimeline();
+        updateNetAdjustmentsDisplay();
+      }
+    });
+
+    function adjustTime(add = true) {
+      const minutes = parseInt(document.getElementById("manualMinutes").value);
+      if (!isNaN(minutes)) {
+        const adjustment = add ? minutes * 60 : -minutes * 60;
+        elapsed += adjustment;
+        netAdjustments += adjustment;
+        if (elapsed < 0) elapsed = 0;
+        updateTimerDisplay();
+        saveToStorage();
+        showHistory();
+        updateNetAdjustmentsDisplay();
+      }
+    }
+
+    // Initialize on load
+    loadFromStorage();
+    showHistory();
+    updateTimeline();
+
+    // Handle history collapse toggle
+    const historyCollapse = document.getElementById('historyCollapse');
+    const historyToggleText = document.getElementById('historyToggleText');
+    const historyToggleIcon = document.getElementById('historyToggleIcon');
+
+    historyCollapse.addEventListener('show.bs.collapse', () => {
+      historyToggleText.textContent = 'Hide History';
+      historyToggleIcon.textContent = '▲';
+    });
+
+    historyCollapse.addEventListener('hide.bs.collapse', () => {
+      historyToggleText.textContent = 'Show History';
+      historyToggleIcon.textContent = '▼';
+    });
+
+    // Save when the page is about to be closed/refreshed
+    window.addEventListener('beforeunload', () => {
+      if (startTime) {
+        console.log("Saving before page unload at", new Date().toLocaleTimeString());
+        saveToStorage();
+      }
+    });
+
+    // Update timeline every 20 seconds if running (for current session growth)
+    setInterval(() => {
+      if (startTime) {
+        updateTimeline();
+      }
+    }, 20000);
+  </script>
+</body>
+</html>
