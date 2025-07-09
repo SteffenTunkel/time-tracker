@@ -16,12 +16,6 @@
     .manual-controls {
       margin: 1.5rem 0;
     }
-    .history-section {
-      background: #f8f9fa;
-      border-top: 1px solid #dee2e6;
-      margin-top: 3rem;
-      padding: 2rem 0;
-    }
     .timeline-section {
       margin: 2rem 0;
       padding: 1.5rem;
@@ -75,9 +69,81 @@
       color: #dc3545;
     }
     .timeline-segment:hover {
-      background: #20c997 !important;
+      filter: brightness(1.1) !important;
       z-index: 10;
       box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    }
+    .timeline-current {
+      animation: colorPulse 5s infinite;
+    }
+    
+    @keyframes colorPulse {
+      0% {
+        filter: brightness(1);
+      }
+      50% {
+        filter: brightness(1.1);
+      }
+      100% {
+        filter: brightness(1);
+      }
+    }
+    .projects-section, .history-section {
+      margin: 2rem 0;
+      padding: 1.5rem;
+      background: white;
+      border-radius: 8px;
+      border: 1px solid #dee2e6;
+    }
+    .project-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 1rem;
+      padding: 0.75rem;
+      border-radius: 6px;
+      border: 1px solid #dee2e6;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+    .project-controls {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .project-delete-btn {
+      background: none;
+      border: none;
+      color: #dc3545;
+      font-size: 1.1rem;
+      padding: 0.25rem;
+      border-radius: 3px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      opacity: 0.7;
+    }
+    .project-delete-btn:hover {
+      opacity: 1;
+      background-color: rgba(220, 53, 69, 0.1);
+    }
+    .project-item:hover {
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    .project-item.active {
+      border-color: #0d6efd;
+      box-shadow: 0 0 0 0.2rem rgba(13, 110, 253, 0.25);
+    }
+    .project-name {
+      font-weight: 500;
+    }
+    .project-timer {
+      font-family: 'Courier New', monospace;
+      font-size: 1.1rem;
+      font-weight: bold;
+    }
+    .new-project-input {
+      width: 100%;
+      margin-top: 1rem;
     }
   </style>
 </head>
@@ -96,9 +162,11 @@
           
           <div class="manual-controls">
             <div class="input-group justify-content-center">
-              <input type="number" id="manualMinutes" class="form-control" placeholder="Minutes" style="max-width: 120px;">
-              <button onclick="adjustTime(true)" class="btn btn-outline-success">+ Minutes</button>
-              <button onclick="adjustTime(false)" class="btn btn-outline-danger">- Minutes</button>
+              <input type="number" id="manualMinutes" class="form-control" value="10" style="max-width: 80px;">
+              <button id="addBtn" onclick="adjustTime(true)" class="btn btn-outline-success">+ 10 Min</button>
+              <button id="subtractBtn" onclick="adjustTime(false)" class="btn btn-outline-danger">- 10 Min</button>
+              <button id="syncBtn" onclick="forceSynchronization()" class="btn btn-outline-info" title="Force timer synchronization">⚡ Sync</button>
+              <button id="debugBtn" onclick="debugTimelineData()" class="btn btn-outline-secondary" title="Debug timeline data">🔍 Debug</button>
             </div>
           </div>
 
@@ -114,6 +182,37 @@
             <div class="timeline-bar" id="timelineBar"></div>
             <div class="text-center mt-3">
               <div>Net Manual Adjustments: <span id="netAdjustments" class="net-time">+00:00</span></div>
+              <div class="small text-muted mt-1">
+                Project Sum: <span id="projectSum">00:00:00</span> | 
+                Sync Status: <span id="syncStatus" class="text-success">✓ In Sync</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="projects-section">
+            <div class="text-center">
+              <button class="btn btn-outline-secondary mb-3" type="button" data-bs-toggle="collapse" data-bs-target="#projectsCollapse" aria-expanded="true" aria-controls="projectsCollapse">
+                <span id="projectsToggleText">Hide Projects</span>
+                <i id="projectsToggleIcon" class="ms-2">▲</i>
+              </button>
+            </div>
+            <div class="collapse show" id="projectsCollapse">
+              <h5 class="text-center mb-3">Projects</h5>
+              <div id="projectsList"></div>
+              <input type="text" id="newProjectInput" class="form-control new-project-input" placeholder="Add new project..." onkeypress="handleNewProject(event)">
+            </div>
+          </div>
+
+          <div class="history-section">
+            <div class="text-center">
+              <button class="btn btn-outline-secondary mb-3" type="button" data-bs-toggle="collapse" data-bs-target="#historyCollapse" aria-expanded="false" aria-controls="historyCollapse">
+                <span id="historyToggleText">Show History</span>
+                <i id="historyToggleIcon" class="ms-2">▼</i>
+              </button>
+            </div>
+            <div class="collapse" id="historyCollapse">
+              <h5 class="text-center mb-3">Last 7 Days</h5>
+              <ul id="historyList" class="list-group"></ul>
             </div>
           </div>
         </div>
@@ -121,33 +220,22 @@
     </div>
   </div>
 
-  <footer class="history-section">
-    <div class="container">
-      <div class="row justify-content-center">
-        <div class="col-md-8 col-lg-6">
-          <div class="text-center">
-            <button class="btn btn-outline-secondary mb-3" type="button" data-bs-toggle="collapse" data-bs-target="#historyCollapse" aria-expanded="false" aria-controls="historyCollapse">
-              <span id="historyToggleText">Show History</span>
-              <i id="historyToggleIcon" class="ms-2">▼</i>
-            </button>
-          </div>
-          <div class="collapse" id="historyCollapse">
-            <h3 class="text-center mb-4">Last 7 Days</h3>
-            <ul id="historyList" class="list-group"></ul>
-          </div>
-        </div>
-      </div>
-    </div>
-  </footer>
-
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
   <script>
     let startTime = null;
     let elapsed = 0;
     let timerInterval = null;
     let netAdjustments = 0; // Track manual adjustments
+    let projects = []; // Array to store projects
+    let activeProject = null; // Currently active project
     const timerDisplay = document.getElementById('timer');
     const startPauseBtn = document.getElementById('startPauseBtn');
+
+    // Project colors
+    const projectColors = [
+      '#007bff', '#28a745', '#dc3545', '#ffc107', '#17a2b8',
+      '#6f42c1', '#e83e8c', '#fd7e14', '#20c997', '#6c757d'
+    ];
 
     function formatTime(seconds) {
       const h = String(Math.floor(seconds / 3600)).padStart(2, '0');
@@ -159,6 +247,42 @@
     function updateTimerDisplay() {
       const currentElapsed = elapsed + (startTime ? Math.floor((Date.now() - startTime) / 1000) : 0);
       timerDisplay.textContent = formatTime(currentElapsed);
+      
+      // Update all project timers to ensure they stay in sync
+      updateProjectTimers();
+      
+      // Update project sum display
+      const totalProjectTime = projects.reduce((total, project) => {
+        const currentTime = project.timeToday + (project.startTime ? Math.floor((Date.now() - project.startTime) / 1000) : 0);
+        return total + currentTime;
+      }, 0);
+      
+      const projectSumElement = document.getElementById('projectSum');
+      const syncStatusElement = document.getElementById('syncStatus');
+      
+      if (projectSumElement) {
+        projectSumElement.textContent = formatTime(totalProjectTime);
+      }
+      
+      if (syncStatusElement) {
+        const difference = Math.abs(currentElapsed - totalProjectTime);
+        if (difference <= 3) {
+          syncStatusElement.textContent = '✓ In Sync';
+          syncStatusElement.className = 'text-success';
+        } else {
+          syncStatusElement.textContent = `⚠ Off by ${difference}s`;
+          syncStatusElement.className = 'text-warning';
+        }
+      }
+      
+      // Every 30 seconds, verify and correct synchronization to prevent drift
+      if (currentElapsed % 30 === 0) {
+        const difference = Math.abs(currentElapsed - totalProjectTime);
+        if (difference > 3) { // 3 second tolerance
+          console.log(`Correcting timer drift: Main ${formatTime(currentElapsed)}, Projects ${formatTime(totalProjectTime)}, Diff: ${difference}s`);
+          syncProjectTimersToMainTimer();
+        }
+      }
     }
 
     function saveToStorage() {
@@ -185,6 +309,8 @@
       // Save timeline and adjustments
       saveTimelineData();
       saveNetAdjustments();
+      saveProjects();
+      saveActiveProject();
       
       console.log("Saved to storage at", new Date().toLocaleTimeString());
     }
@@ -200,11 +326,27 @@
         if (state.date === today && state.isRunning) {
           // Timer was running when the page was closed
           // Continue the existing session with the original start time
-          // Don't add time to elapsed - let the normal calculation handle it
           startTime = state.startTime;
           elapsed = state.elapsed; // Keep the original elapsed time
-          timerInterval = setInterval(updateTimerDisplay, 1000);
+          
+          // Start the timer interval
+          timerInterval = setInterval(() => {
+            updateTimerDisplay();
+            // Verify synchronization every 10 seconds (when seconds end in 0)
+            const now = new Date();
+            if (now.getSeconds() % 10 === 0) {
+              if (!verifySynchronization()) {
+                console.log("Synchronization drift detected, correcting...");
+                syncProjectTimersToMainTimer();
+              }
+            }
+          }, 1000);
           startPauseBtn.textContent = 'Pause';
+          
+          // Start active project timer if it exists - use the same startTime as main timer
+          if (activeProject) {
+            activeProject.startTime = state.startTime;
+          }
         } else if (state.date === today) {
           // Timer was paused
           elapsed = state.elapsed;
@@ -223,6 +365,7 @@
       updateTimerDisplay();
       loadNetAdjustments();
       updateTimeline();
+      loadActiveProject();
     }
 
     function showHistory() {
@@ -247,7 +390,7 @@
 
     function saveTimelineData() {
       const today = new Date().toISOString().slice(0, 10);
-      if (!startTime) return;
+      if (!startTime || !activeProject || !activeProject.startTime) return;
       
       let timelineData = {};
       try {
@@ -260,12 +403,25 @@
         timelineData[today] = [];
       }
       
-      // Add current session to timeline
-      const sessionStart = startTime;
+      // Add current session to timeline with project info
+      // Use the project's start time, not the main timer's start time
+      const sessionStart = activeProject.startTime;
       const sessionEnd = Date.now();
-      timelineData[today].push({ start: sessionStart, end: sessionEnd });
       
-      localStorage.setItem("timelineData", JSON.stringify(timelineData));
+      // Only save if the session has a meaningful duration (more than 1 second)
+      if (sessionEnd - sessionStart > 1000) {
+        const session = { 
+          start: sessionStart, 
+          end: sessionEnd,
+          projectId: activeProject.id,
+          projectName: activeProject.name,
+          projectColor: activeProject.color
+        };
+        timelineData[today].push(session);
+        
+        localStorage.setItem("timelineData", JSON.stringify(timelineData));
+        console.log(`Saved timeline session: ${activeProject.name} from ${new Date(sessionStart).toLocaleTimeString()} to ${new Date(sessionEnd).toLocaleTimeString()}`);
+      }
     }
 
     function saveNetAdjustments() {
@@ -330,15 +486,18 @@
       }
       
       // Find the time range of actual activity
-      let earliestTime = startTime || Date.now();
-      let latestTime = startTime || Date.now();
+      let earliestTime = Date.now();
+      let latestTime = Date.now();
       
+      // Include saved sessions
       todayData.forEach(session => {
         earliestTime = Math.min(earliestTime, session.start);
         latestTime = Math.max(latestTime, session.end);
       });
       
+      // Include current running session if any - use main timer start time
       if (startTime) {
+        earliestTime = Math.min(earliestTime, startTime);
         latestTime = Math.max(latestTime, Date.now());
       }
       
@@ -376,7 +535,7 @@
       }
       
       // Create segments only for periods when the timer was actually running
-      // Each completed session becomes a separate segment
+      // Each completed session becomes a separate segment with project color
       todayData.forEach(session => {
         if (session.end <= timelineStart || session.start >= timelineEnd) return;
         
@@ -392,33 +551,43 @@
           segment.style.left = leftPercent + '%';
           segment.style.width = widthPercent + '%';
           
-          // Add simple title tooltip
+          // Use project color if available, otherwise default green
+          const segmentColor = session.projectColor || '#28a745';
+          segment.style.backgroundColor = segmentColor;
+          
+          // Add simple title tooltip with project info
           const startDate = new Date(sessionStart);
           const endDate = new Date(sessionEnd);
           const startTimeStr = startDate.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
           const endTimeStr = endDate.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
           const duration = Math.round((sessionEnd - sessionStart) / 60000); // duration in minutes
+          const projectName = session.projectName || 'Unknown project';
           
-          segment.title = `${startTimeStr} - ${endTimeStr} (${duration} Min.)`;
+          segment.title = `${startTimeStr} - ${endTimeStr} (${duration} Min.) - ${projectName}`;
           segment.style.cursor = 'help';
           
           timelineBar.appendChild(segment);
         }
       });
       
-      // Add current session if running
-      if (startTime) {
-        const currentStart = Math.max(startTime, timelineStart);
+      // Add current session if running - show from when current project started to now
+      if (startTime && activeProject && activeProject.startTime) {
+        // Use the project's start time
+        const currentProjectStart = activeProject.startTime;
+        const currentStart = Math.max(currentProjectStart, timelineStart);
         const currentEnd = Math.min(Date.now(), timelineEnd);
         
-        if (currentStart < timelineEnd && currentEnd > timelineStart) {
+        if (currentStart < timelineEnd && currentEnd > timelineStart && currentStart < currentEnd) {
           const leftPercent = ((currentStart - timelineStart) / timelineDuration) * 100;
           const widthPercent = ((currentEnd - currentStart) / timelineDuration) * 100;
           
           const segment = document.createElement('div');
-          segment.className = 'timeline-segment';
+          segment.className = 'timeline-segment timeline-current';
           segment.style.left = leftPercent + '%';
           segment.style.width = widthPercent + '%';
+          
+          // Use the project's color directly - same as any other segment
+          segment.style.backgroundColor = activeProject.color;
           
           // Add simple title tooltip for current session
           const startDate = new Date(currentStart);
@@ -426,8 +595,9 @@
           const startTimeStr = startDate.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
           const currentTimeStr = currentDate.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
           const duration = Math.round((currentEnd - currentStart) / 60000); // duration in minutes
+          const projectName = activeProject.name;
           
-          segment.title = `${startTimeStr} - ${currentTimeStr} (${duration} Min.) - Läuft gerade`;
+          segment.title = `${startTimeStr} - ${currentTimeStr} (${duration} Min.) - ${projectName} - Läuft gerade`;
           segment.style.cursor = 'help';
           
           timelineBar.appendChild(segment);
@@ -451,20 +621,51 @@
     // Timer Controls
     startPauseBtn.addEventListener('click', () => {
       if (startTime) {
-        // Pause
+        // Pause - verify sync before stopping
+        if (!verifySynchronization()) {
+          console.log("Correcting timer sync before pause");
+          syncProjectTimersToMainTimer();
+        }
+        
         saveTimelineData(); // Save timeline before pausing
         elapsed += Math.floor((Date.now() - startTime) / 1000);
         startTime = null;
+        
+        // Pause active project timer
+        if (activeProject && activeProject.startTime) {
+          activeProject.timeToday += Math.floor((Date.now() - activeProject.startTime) / 1000);
+          activeProject.startTime = null;
+        }
+        
         clearInterval(timerInterval);
         saveToStorage();
         startPauseBtn.textContent = 'Start';
         updateTimeline();
+        renderProjects();
+        
+        // Final sync verification after pause
+        verifySynchronization();
       } else {
         // Start
         startTime = Date.now();
+        
+        // Start active project timer with the same start time
+        if (activeProject) {
+          activeProject.startTime = startTime;
+        }
+        
         timerInterval = setInterval(() => {
           updateTimerDisplay();
+          // Verify synchronization every 10 seconds (when seconds end in 0)
+          const now = new Date();
+          if (now.getSeconds() % 10 === 0) {
+            if (!verifySynchronization()) {
+              console.log("Correcting timer drift during operation");
+              syncProjectTimersToMainTimer();
+            }
+          }
         }, 1000);
+        
         startPauseBtn.textContent = 'Pause';
         updateTimeline(); // Update timeline once when starting
       }
@@ -478,9 +679,23 @@
         startTime = null;
         elapsed = 0;
         netAdjustments = 0;
+        
+        // Reset project times
+        projects.forEach(project => {
+          project.timeToday = 0;
+          project.startTime = null;
+        });
+        
+        // Reset to default "General Work"
+        const generalWork = projects.find(p => p.name === "General Work");
+        activeProject = generalWork || null;
+        
         clearInterval(timerInterval);
         updateTimerDisplay();
         saveToStorage();
+        saveProjects();
+        saveActiveProject();
+        
         // Clear the timer state and timeline data
         localStorage.removeItem("timerState");
         const today = new Date().toISOString().slice(0, 10);
@@ -490,10 +705,12 @@
         let adjustments = JSON.parse(localStorage.getItem("netAdjustments") || "{}");
         delete adjustments[today];
         localStorage.setItem("netAdjustments", JSON.stringify(adjustments));
+        
         startPauseBtn.textContent = 'Start';
         showHistory();
         updateTimeline();
         updateNetAdjustmentsDisplay();
+        renderProjects();
       }
     });
 
@@ -504,17 +721,451 @@
         elapsed += adjustment;
         netAdjustments += adjustment;
         if (elapsed < 0) elapsed = 0;
+        
+        // Apply adjustment to currently active project
+        if (activeProject) {
+          activeProject.timeToday += adjustment;
+          if (activeProject.timeToday < 0) activeProject.timeToday = 0;
+        }
+        
         updateTimerDisplay();
         saveToStorage();
         showHistory();
         updateNetAdjustmentsDisplay();
+        renderProjects(); // Update project display
+        
+        // Verify synchronization after manual adjustment
+        verifySynchronization();
       }
     }
 
+    function updateButtonText() {
+      const minutes = parseInt(document.getElementById("manualMinutes").value) || 10;
+      document.getElementById("addBtn").textContent = `+ ${minutes} Min`;
+      document.getElementById("subtractBtn").textContent = `- ${minutes} Min`;
+    }
+
+    // Project Management Functions
+    function loadProjects() {
+      const today = new Date().toISOString().slice(0, 10);
+      const savedProjects = JSON.parse(localStorage.getItem("projects") || "[]");
+      const savedProjectTimes = JSON.parse(localStorage.getItem("projectTimes") || "{}");
+      const projectStates = JSON.parse(localStorage.getItem("projectStates") || "{}");
+      const isToday = projectStates.date === today;
+      
+      // Ensure default "General Work" exists
+      if (savedProjects.length === 0 || !savedProjects.find(p => p.name === "General Work")) {
+        const defaultProject = {
+          id: "general-work",
+          name: "General Work",
+          color: "#007bff" // Blue color for "General Work"
+        };
+        savedProjects.unshift(defaultProject);
+        localStorage.setItem("projects", JSON.stringify(savedProjects));
+      }
+      
+      projects = savedProjects.map(project => ({
+        ...project,
+        timeToday: savedProjectTimes[today]?.[project.id] || 0,
+        startTime: null
+      }));
+      
+      // Restore project timer states if it's the same day
+      if (isToday && projectStates.projectTimerStates) {
+        projectStates.projectTimerStates.forEach(state => {
+          const project = projects.find(p => p.id === state.id);
+          if (project && state.startTime) {
+            // Don't calculate elapsed time here - just restore the original state
+            // Let the display calculation handle the elapsed time
+            project.timeToday = state.timeToday; // Keep original timeToday
+            project.startTime = state.startTime; // Keep original start time for continued tracking
+          } else if (project && state.timeToday !== undefined) {
+            project.timeToday = state.timeToday;
+          }
+        });
+      }
+      
+      renderProjects();
+    }
+
+    function saveActiveProject() {
+      const activeProjectId = activeProject ? activeProject.id : null;
+      localStorage.setItem("activeProject", activeProjectId || "");
+    }
+
+    function loadActiveProject() {
+      const projectStates = JSON.parse(localStorage.getItem("projectStates") || "{}");
+      const today = new Date().toISOString().slice(0, 10);
+      const isToday = projectStates.date === today;
+      
+      let savedActiveProjectId = null;
+      if (isToday && projectStates.activeProjectId) {
+        savedActiveProjectId = projectStates.activeProjectId;
+      } else {
+        savedActiveProjectId = localStorage.getItem("activeProject");
+      }
+      
+      if (savedActiveProjectId) {
+        const project = projects.find(p => p.id === savedActiveProjectId);
+        if (project) {
+          activeProject = project;
+          // Only set start time if main timer is running and project wasn't already restored with a start time
+          if (startTime && !project.startTime) {
+            project.startTime = startTime;
+          }
+        }
+      } else if (projects.length > 0) {
+        // Default to "General Work" if no active project is saved
+        const generalWork = projects.find(p => p.name === "General Work");
+        if (generalWork) {
+          activeProject = generalWork;
+          if (startTime && !generalWork.startTime) {
+            generalWork.startTime = startTime;
+          }
+        }
+      }
+      renderProjects();
+    }
+
+    function saveProjects() {
+      const today = new Date().toISOString().slice(0, 10);
+      // Save project definitions
+      const projectsToSave = projects.map(p => ({
+        id: p.id,
+        name: p.name,
+        color: p.color
+      }));
+      localStorage.setItem("projects", JSON.stringify(projectsToSave));
+      
+      // Save project times
+      let projectTimes = JSON.parse(localStorage.getItem("projectTimes") || "{}");
+      if (!projectTimes[today]) projectTimes[today] = {};
+      
+      projects.forEach(project => {
+        const currentTime = project.timeToday + (project.startTime ? Math.floor((Date.now() - project.startTime) / 1000) : 0);
+        projectTimes[today][project.id] = currentTime;
+      });
+      
+      localStorage.setItem("projectTimes", JSON.stringify(projectTimes));
+      
+      // Save project timer states (including start times)
+      const projectStates = {
+        activeProjectId: activeProject ? activeProject.id : null,
+        projectTimerStates: projects.map(p => ({
+          id: p.id,
+          timeToday: p.timeToday,
+          startTime: p.startTime
+        })),
+        date: today
+      };
+      localStorage.setItem("projectStates", JSON.stringify(projectStates));
+    }
+
+    function renderProjects() {
+      const projectsList = document.getElementById('projectsList');
+      projectsList.innerHTML = '';
+      
+      projects.forEach(project => {
+        const projectDiv = document.createElement('div');
+        projectDiv.className = `project-item ${activeProject?.id === project.id ? 'active' : ''}`;
+        projectDiv.style.backgroundColor = project.color + '20';
+        projectDiv.style.borderColor = project.color;
+        
+        const currentTime = project.timeToday + (project.startTime ? Math.floor((Date.now() - project.startTime) / 1000) : 0);
+        
+        // Create project content
+        const projectContent = document.createElement('div');
+        projectContent.style.display = 'flex';
+        projectContent.style.alignItems = 'center';
+        projectContent.style.justifyContent = 'space-between';
+        projectContent.style.width = '100%';
+        projectContent.onclick = () => selectProject(project.id);
+        
+        const projectName = document.createElement('span');
+        projectName.className = 'project-name';
+        projectName.style.color = project.color;
+        projectName.textContent = project.name;
+        
+        const projectControls = document.createElement('div');
+        projectControls.className = 'project-controls';
+        
+        // Add delete button for non-General Work projects
+        if (project.name !== "General Work") {
+          const deleteBtn = document.createElement('button');
+          deleteBtn.className = 'project-delete-btn';
+          deleteBtn.innerHTML = '🗑️';
+          deleteBtn.title = 'Delete project';
+          deleteBtn.onclick = (e) => {
+            e.stopPropagation(); // Prevent project selection
+            deleteProject(project.id);
+          };
+          projectControls.appendChild(deleteBtn);
+        }
+        
+        const projectTimer = document.createElement('span');
+        projectTimer.className = 'project-timer';
+        projectTimer.id = `project-timer-${project.id}`;
+        projectTimer.textContent = formatTime(currentTime);
+        projectControls.appendChild(projectTimer);
+        
+        projectContent.appendChild(projectName);
+        projectContent.appendChild(projectControls);
+        projectDiv.appendChild(projectContent);
+        
+        projectsList.appendChild(projectDiv);
+      });
+    }
+
+    function selectProject(projectId) {
+      console.log(`Switching to project: ${projectId}`);
+      debugTimelineData(); // Debug before switch
+      
+      // Verify synchronization before switching projects
+      if (!verifySynchronization()) {
+        console.log("Correcting timer sync before project switch");
+        syncProjectTimersToMainTimer();
+      }
+      
+      // Stop current project if any and save its session
+      if (activeProject && activeProject.startTime) {
+        console.log(`Stopping current project: ${activeProject.name}`);
+        
+        // Save the current running session before stopping
+        if (startTime) {
+          saveTimelineData(); // This ends the current session with the old project
+        }
+        
+        // Now stop the current project timer
+        activeProject.timeToday += Math.floor((Date.now() - activeProject.startTime) / 1000);
+        activeProject.startTime = null;
+      }
+      
+      // Start new project
+      const project = projects.find(p => p.id === projectId);
+      if (project) {
+        console.log(`Starting new project: ${project.name}`);
+        activeProject = project;
+        if (startTime) { // Only start project timer if main timer is running
+          // Start project timer from current time - main timer startTime stays unchanged
+          project.startTime = Date.now();
+        }
+        renderProjects();
+        saveProjects();
+        saveActiveProject();
+        
+        // Force timeline refresh to show the transition
+        setTimeout(() => {
+          updateTimeline(); // Update timeline to show the separation
+          debugTimelineData(); // Debug after switch
+        }, 50);
+        
+        // Verify synchronization after switching
+        setTimeout(() => verifySynchronization(), 100);
+      }
+    }
+
+    function handleNewProject(event) {
+      if (event.key === 'Enter') {
+        const input = event.target;
+        const projectName = input.value.trim();
+        if (projectName) {
+          const newProject = {
+            id: Date.now().toString(),
+            name: projectName,
+            color: projectColors[projects.length % projectColors.length],
+            timeToday: 0,
+            startTime: null
+          };
+          projects.push(newProject);
+          input.value = '';
+          renderProjects();
+          saveProjects();
+        }
+      }
+    }
+
+    function deleteProject(projectId) {
+      const projectToDelete = projects.find(p => p.id === projectId);
+      if (!projectToDelete || projectToDelete.name === "General Work") {
+        return; // Don't delete General Work or non-existent projects
+      }
+      
+      const projectName = projectToDelete.name;
+      if (confirm(`Delete project "${projectName}"? Its time will be transferred to "General Work".`)) {
+        // Find General Work project
+        const generalWork = projects.find(p => p.name === "General Work");
+        if (generalWork) {
+          // Transfer the time (including currently running time if any)
+          const timeToTransfer = projectToDelete.timeToday + 
+            (projectToDelete.startTime ? Math.floor((Date.now() - projectToDelete.startTime) / 1000) : 0);
+          generalWork.timeToday += timeToTransfer;
+        }
+        
+        // If the deleted project was active, switch to General Work
+        if (activeProject && activeProject.id === projectId) {
+          activeProject = generalWork;
+          if (startTime && generalWork) {
+            // Transfer the running timer to General Work
+            generalWork.startTime = projectToDelete.startTime || Date.now();
+          }
+        }
+        
+        // Remove the project from the array
+        const projectIndex = projects.findIndex(p => p.id === projectId);
+        if (projectIndex !== -1) {
+          projects.splice(projectIndex, 1);
+        }
+        
+        // Update storage and UI
+        renderProjects();
+        saveProjects();
+        saveActiveProject();
+        updateTimeline(); // Update timeline to reflect changes
+      }
+    }
+
+    function updateProjectTimers() {
+      projects.forEach(project => {
+        const timerElement = document.getElementById(`project-timer-${project.id}`);
+        if (timerElement) {
+          const currentTime = project.timeToday + (project.startTime ? Math.floor((Date.now() - project.startTime) / 1000) : 0);
+          timerElement.textContent = formatTime(currentTime);
+        }
+      });
+    }
+
+    function verifySynchronization() {
+      // Calculate total project time
+      const totalProjectTime = projects.reduce((total, project) => {
+        const currentTime = project.timeToday + (project.startTime ? Math.floor((Date.now() - project.startTime) / 1000) : 0);
+        return total + currentTime;
+      }, 0);
+      
+      // Calculate main timer time
+      const mainTimerTime = elapsed + (startTime ? Math.floor((Date.now() - startTime) / 1000) : 0);
+      
+      // Log any discrepancy for debugging
+      const difference = Math.abs(totalProjectTime - mainTimerTime);
+      if (difference > 3) { // Allow 3 seconds tolerance for timing differences
+        console.warn(`Timer synchronization issue detected: Main timer: ${formatTime(mainTimerTime)}, Total project time: ${formatTime(totalProjectTime)}, Difference: ${difference}s`);
+        return false;
+      }
+      
+      return true;
+    }
+
+    function syncProjectTimersToMainTimer() {
+      // This function ensures project timers sum up to the main timer
+      // Called when discrepancies are detected or during critical operations
+      const mainTimerTime = elapsed + (startTime ? Math.floor((Date.now() - startTime) / 1000) : 0);
+      const totalProjectTime = projects.reduce((total, project) => {
+        const currentTime = project.timeToday + (project.startTime ? Math.floor((Date.now() - project.startTime) / 1000) : 0);
+        return total + currentTime;
+      }, 0);
+      
+      const difference = mainTimerTime - totalProjectTime;
+      
+      // If there's a significant difference, adjust the active project to compensate
+      if (Math.abs(difference) > 3 && activeProject) {
+        // Pause any running project timers to avoid double counting
+        const wasRunning = activeProject.startTime !== null;
+        if (wasRunning && activeProject.startTime) {
+          activeProject.timeToday += Math.floor((Date.now() - activeProject.startTime) / 1000);
+          activeProject.startTime = null;
+        }
+        
+        // Apply the correction
+        activeProject.timeToday += difference;
+        if (activeProject.timeToday < 0) activeProject.timeToday = 0;
+        
+        // Restart the timer if it was running
+        if (wasRunning && startTime) {
+          activeProject.startTime = Date.now();
+        }
+        
+        console.log(`Synchronized timers: Applied ${difference}s correction to ${activeProject.name}`);
+        
+        // Update display immediately
+        renderProjects();
+        saveProjects();
+      }
+    }
+
+    function forceSynchronization() {
+      console.log("Manual synchronization requested");
+      
+      // Show current state
+      const mainTimerTime = elapsed + (startTime ? Math.floor((Date.now() - startTime) / 1000) : 0);
+      const totalProjectTime = projects.reduce((total, project) => {
+        const currentTime = project.timeToday + (project.startTime ? Math.floor((Date.now() - project.startTime) / 1000) : 0);
+        return total + currentTime;
+      }, 0);
+      
+      console.log(`Before sync - Main: ${formatTime(mainTimerTime)}, Projects: ${formatTime(totalProjectTime)}, Diff: ${Math.abs(mainTimerTime - totalProjectTime)}s`);
+      
+      // Force synchronization
+      syncProjectTimersToMainTimer();
+      
+      // Update display
+      updateTimerDisplay();
+      renderProjects();
+      
+      // Verify result
+      const newMainTimerTime = elapsed + (startTime ? Math.floor((Date.now() - startTime) / 1000) : 0);
+      const newTotalProjectTime = projects.reduce((total, project) => {
+        const currentTime = project.timeToday + (project.startTime ? Math.floor((Date.now() - project.startTime) / 1000) : 0);
+        return total + currentTime;
+      }, 0);
+      
+      console.log(`After sync - Main: ${formatTime(newMainTimerTime)}, Projects: ${formatTime(newTotalProjectTime)}, Diff: ${Math.abs(newMainTimerTime - newTotalProjectTime)}s`);
+      
+      // Save the corrected state
+      saveToStorage();
+      saveProjects();
+    }
+
+    function debugTimelineData() {
+      const today = new Date().toISOString().slice(0, 10);
+      const timelineData = JSON.parse(localStorage.getItem("timelineData") || "{}");
+      const todayData = timelineData[today] || [];
+      
+      console.log("=== Timeline Debug ===");
+      console.log(`Date: ${today}`);
+      console.log(`Saved sessions: ${todayData.length}`);
+      todayData.forEach((session, index) => {
+        const start = new Date(session.start).toLocaleTimeString();
+        const end = new Date(session.end).toLocaleTimeString();
+        const duration = Math.round((session.end - session.start) / 60000);
+        console.log(`  ${index + 1}: ${session.projectName} - ${start} to ${end} (${duration} min)`);
+      });
+      
+      if (startTime && activeProject && activeProject.startTime) {
+        const currentStart = new Date(activeProject.startTime).toLocaleTimeString();
+        const currentNow = new Date().toLocaleTimeString();
+        const currentDuration = Math.round((Date.now() - activeProject.startTime) / 60000);
+        console.log(`Current: ${activeProject.name} - ${currentStart} to ${currentNow} (${currentDuration} min) - RUNNING`);
+      }
+      console.log("=====================");
+    }
+
     // Initialize on load
+    loadProjects();
     loadFromStorage();
     showHistory();
     updateTimeline();
+    updateButtonText();
+    
+    // Perform initial synchronization check after everything is loaded
+    setTimeout(() => {
+      if (!verifySynchronization()) {
+        console.log("Initial synchronization correction needed");
+        syncProjectTimersToMainTimer();
+        renderProjects();
+      }
+    }, 500);
+
+    // Update button text when input changes
+    document.getElementById('manualMinutes').addEventListener('input', updateButtonText);
 
     // Handle history collapse toggle
     const historyCollapse = document.getElementById('historyCollapse');
@@ -529,6 +1180,21 @@
     historyCollapse.addEventListener('hide.bs.collapse', () => {
       historyToggleText.textContent = 'Show History';
       historyToggleIcon.textContent = '▼';
+    });
+
+    // Handle projects collapse toggle
+    const projectsCollapse = document.getElementById('projectsCollapse');
+    const projectsToggleText = document.getElementById('projectsToggleText');
+    const projectsToggleIcon = document.getElementById('projectsToggleIcon');
+
+    projectsCollapse.addEventListener('show.bs.collapse', () => {
+      projectsToggleText.textContent = 'Hide Projects';
+      projectsToggleIcon.textContent = '▲';
+    });
+
+    projectsCollapse.addEventListener('hide.bs.collapse', () => {
+      projectsToggleText.textContent = 'Show Projects';
+      projectsToggleIcon.textContent = '▼';
     });
 
     // Save when the page is about to be closed/refreshed
