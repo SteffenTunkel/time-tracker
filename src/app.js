@@ -364,22 +364,12 @@ class Timer {
       this.reset();
     });
 
-    const manualMinutesInput = document.getElementById('manualMinutes');
-    manualMinutesInput.addEventListener('input', this.updateButtonText);
-
     window.addEventListener('beforeunload', () => {
       if (this.isRunning()) {
         this.saveToStorage();
       }
     });
 
-    this.updateButtonText();
-  }
-
-  updateButtonText() {
-    const minutes = parseInt(document.getElementById('manualMinutes').value) || 10;
-    document.getElementById('addBtn').textContent = `+ ${minutes} Min`;
-    document.getElementById('subtractBtn').textContent = `- ${minutes} Min`;
   }
 }
 
@@ -817,8 +807,11 @@ class Timeline {
 
 // History Class
 class History {
-  constructor() {
+  constructor(timeline) {
+    this.timeline = timeline;
     this.historyList = document.getElementById('historyList');
+    this.activeCard = null;
+    this.activeDraft = null;
     this.setupEventListeners();
     this.showHistory();
   }
@@ -838,30 +831,283 @@ class History {
       const sessions = (timelineData[key] || []).filter(session => Number.isFinite(session.start) && Number.isFinite(session.end));
       const firstStart = sessions.length ? Math.min(...sessions.map(session => session.start)) : null;
       const lastEnd = sessions.length ? Math.max(...sessions.map(session => session.end)) : null;
-      days.push({ date, time, firstStart, lastEnd });
+      days.push({ key, date, time, firstStart, lastEnd });
     }
 
     const maxTime = Math.max(1, ...days.map(day => day.time));
-    days.forEach(({ date, time, firstStart, lastEnd }) => {
+    days.forEach(({ key, date, time, firstStart, lastEnd }) => {
       const start = firstStart === null ? 'Not recorded' : Utils.formatDisplayTime(firstStart);
       const end = lastEnd === null ? 'Not recorded' : Utils.formatDisplayTime(lastEnd);
       const barWidth = time > 0 ? Math.max(2, (time / maxTime) * 100) : 0;
       
       const li = document.createElement('li');
-      li.className = 'history-row';
+      li.className = 'history-card';
       li.innerHTML = `
-        <div class="history-day">${this.formatDateDisplay(date)}</div>
-        <div class="history-session-times">
-          <span><small>START</small><strong>${start}</strong></span>
-          <span><small>END</small><strong>${end}</strong></span>
+        <div class="history-row" role="button" tabindex="0" aria-expanded="false" aria-controls="history-editor-${key}">
+          <div class="history-day">${this.formatDateDisplay(date)}</div>
+          <div class="history-session-times">
+            <span><small>START</small><strong>${start}</strong></span>
+            <span><small>END</small><strong>${end}</strong></span>
+          </div>
+          <div class="history-total">
+            <div class="history-bar"><span style="width: ${barWidth}%"></span></div>
+            <span class="history-duration">${Utils.formatTime(time)}</span>
+          </div>
         </div>
-        <div class="history-total">
-          <div class="history-bar"><span style="width: ${barWidth}%"></span></div>
-          <span class="history-duration">${Utils.formatTime(time)}</span>
-        </div>
+        <div id="history-editor-${key}" class="history-editor" hidden></div>
       `;
+      const trigger = li.querySelector('.history-row');
+      trigger.addEventListener('click', () => this.toggleEditor(li, key, date));
+      trigger.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          this.toggleEditor(li, key, date);
+        }
+      });
       this.historyList.appendChild(li);
     });
+  }
+
+  toggleEditor(card, dateKey, date) {
+    if (this.activeCard === card) {
+      this.discardActive();
+      return;
+    }
+
+    this.discardActive();
+    const timelineData = StorageManager.getTimelineData();
+    const workTimes = StorageManager.getWorkTimes();
+    const adjustments = StorageManager.getNetAdjustments();
+    const [year, month, day] = dateKey.split('-').map(Number);
+    const dayStart = new Date(year, month - 1, day).getTime();
+    const sessions = this.timeline.mergeSessions(timelineData[dateKey] || []);
+    const firstStart = sessions.length ? Math.min(...sessions.map(session => session.start)) : dayStart + 9 * 3600000;
+    const draft = {
+      dateKey,
+      dayStart,
+      dayEnd: dayStart + 24 * 3600000,
+      sessions,
+      seconds: workTimes[dateKey] || 0,
+      netAdjustments: adjustments[dateKey] || 0,
+      selectedTime: firstStart,
+      maxTime: Math.max(1, ...Object.values(workTimes)),
+      dirty: false
+    };
+
+    this.activeCard = card;
+    this.activeDraft = draft;
+    card.classList.add('is-expanded');
+    card.querySelector('.history-row').setAttribute('aria-expanded', 'true');
+
+    const editor = card.querySelector('.history-editor');
+    editor.innerHTML = `
+      <div class="history-editor-heading">
+        <div>
+          <p class="eyebrow">ACTIVITY TIMELINE</p>
+          <strong>${this.formatDateDisplay(date)}</strong>
+        </div>
+        <span class="history-editor-hint">Click the timeline to choose a time</span>
+      </div>
+      <div class="history-editor-labels"></div>
+      <div class="history-editor-bar" role="presentation"></div>
+      <div class="history-editor-controls">
+        <label class="history-editor-field">
+          <span>AT</span>
+          <input class="history-editor-time" type="time" aria-label="Adjustment time for this day">
+        </label>
+        <label class="history-editor-field">
+          <span>MIN</span>
+          <input class="history-editor-minutes" type="number" value="10" min="1" inputmode="numeric" aria-label="Adjustment duration in minutes">
+        </label>
+        <button class="adjustment-action adjustment-add history-editor-add" type="button" title="Add time at selected point" aria-label="Add time at selected point">+</button>
+        <button class="adjustment-action adjustment-subtract history-editor-remove" type="button" title="Remove time from selected point" aria-label="Remove time from selected point">−</button>
+        <div class="history-draft-total"><span>DAY TOTAL</span><strong></strong></div>
+        <span class="history-editor-message" role="status" aria-live="polite"></span>
+      </div>
+      <div class="history-editor-actions">
+        <button class="history-editor-discard" type="button">Discard</button>
+        <button class="history-editor-save" type="button" disabled>Save changes</button>
+      </div>
+    `;
+    editor.hidden = false;
+    const timeInput = editor.querySelector('.history-editor-time');
+    const minutesInput = editor.querySelector('.history-editor-minutes');
+    const bar = editor.querySelector('.history-editor-bar');
+    timeInput.value = this.timeline.formatTimeInput(draft.selectedTime);
+    timeInput.addEventListener('input', () => {
+      const [hours, minutes] = timeInput.value.split(':').map(Number);
+      draft.selectedTime = dayStart + (hours * 60 + minutes) * 60000;
+      this.updateEditor(draft);
+    });
+    minutesInput.addEventListener('input', () => this.renderEditorTimeline(draft));
+    bar.addEventListener('click', (event) => {
+      const bounds = bar.getBoundingClientRect();
+      const position = Math.min(1, Math.max(0, (event.clientX - bounds.left) / bounds.width));
+      draft.selectedTime = Math.min(dayStart + Math.round(position * 1440) * 60000, draft.dayEnd - 60000);
+      timeInput.value = this.timeline.formatTimeInput(draft.selectedTime);
+      this.updateEditor(draft);
+    });
+    editor.querySelector('.history-editor-add').addEventListener('click', () => this.addDraftTime(draft));
+    editor.querySelector('.history-editor-remove').addEventListener('click', () => this.removeDraftTime(draft));
+    editor.querySelector('.history-editor-discard').addEventListener('click', () => this.discardActive());
+    editor.querySelector('.history-editor-save').addEventListener('click', () => this.saveDraft(draft));
+    this.updateEditor(draft);
+  }
+
+  updateEditor(draft) {
+    const editor = draft.card || this.activeCard?.querySelector('.history-editor');
+    if (!editor) return;
+    editor.querySelector('.history-editor-time').value = this.timeline.formatTimeInput(draft.selectedTime);
+    editor.querySelector('.history-draft-total strong').textContent = Utils.formatTime(draft.seconds);
+    editor.querySelector('.history-editor-save').disabled = !draft.dirty;
+    this.renderEditorTimeline(draft);
+  }
+
+  renderEditorTimeline(draft) {
+    const editor = this.activeCard?.querySelector('.history-editor');
+    if (!editor) return;
+    const labels = editor.querySelector('.history-editor-labels');
+    const bar = editor.querySelector('.history-editor-bar');
+    labels.innerHTML = '';
+    bar.innerHTML = '';
+
+    [0, 6, 12, 18, 24].forEach(hour => {
+      const percent = (hour / 24) * 100;
+      const label = document.createElement('span');
+      label.className = 'history-editor-label';
+      label.style.left = `${percent}%`;
+      label.textContent = `${String(hour).padStart(2, '0')}:00`;
+      labels.appendChild(label);
+
+      const tick = document.createElement('span');
+      tick.className = 'history-editor-tick';
+      tick.style.left = `${percent}%`;
+      bar.appendChild(tick);
+    });
+
+    const dayDuration = draft.dayEnd - draft.dayStart;
+    draft.sessions.forEach(session => {
+      const start = Math.max(session.start, draft.dayStart);
+      const end = Math.min(session.end, draft.dayEnd);
+      if (end <= start) return;
+      const segment = document.createElement('span');
+      segment.className = 'history-editor-session';
+      segment.style.left = `${((start - draft.dayStart) / dayDuration) * 100}%`;
+      segment.style.width = `${Math.max(0.25, ((end - start) / dayDuration) * 100)}%`;
+      segment.title = `${Utils.formatDisplayTime(start)} - ${Utils.formatDisplayTime(end)}`;
+      bar.appendChild(segment);
+    });
+
+    const minutes = this.getDraftMinutes(draft);
+    const selectedEnd = Math.min(draft.selectedTime + minutes * 60000, draft.dayEnd);
+    const trackWidth = bar.getBoundingClientRect().width;
+    if (trackWidth > 0) {
+      const windowWidth = Math.min(trackWidth, Math.max(4, ((selectedEnd - draft.selectedTime) / dayDuration) * trackWidth));
+      const selectedOffset = ((draft.selectedTime - draft.dayStart) / dayDuration) * trackWidth;
+      const marker = document.createElement('span');
+      marker.className = 'history-editor-window';
+      marker.style.left = `${Math.max(0, Math.min(selectedOffset, trackWidth - windowWidth))}px`;
+      marker.style.width = `${windowWidth}px`;
+      bar.appendChild(marker);
+    }
+  }
+
+  getDraftMinutes(draft) {
+    const input = this.activeCard?.querySelector('.history-editor-minutes');
+    const minutes = Number.parseInt(input?.value, 10);
+    return Number.isFinite(minutes) && minutes > 0 ? minutes : 10;
+  }
+
+  addDraftTime(draft) {
+    const start = draft.selectedTime;
+    const end = Math.min(start + this.getDraftMinutes(draft) * 60000, draft.dayEnd);
+    if (end <= start) {
+      this.setEditorMessage('Choose a time before the end of the day.');
+      return;
+    }
+
+    const covered = this.timeline.getCoveredMilliseconds(draft.sessions, start, end);
+    const addedSeconds = Math.floor(((end - start) - covered) / 1000);
+    draft.sessions = this.timeline.mergeSessions([...draft.sessions, { start, end, manual: true }]);
+    draft.seconds += addedSeconds;
+    draft.netAdjustments += addedSeconds;
+    draft.dirty = true;
+    this.setEditorMessage(addedSeconds > 0
+      ? `Added ${Utils.formatTime(addedSeconds)} to this day.`
+      : 'Connected work periods merged; no additional time was added.');
+    this.updateEditor(draft);
+  }
+
+  removeDraftTime(draft) {
+    const start = draft.selectedTime;
+    const end = Math.min(start + this.getDraftMinutes(draft) * 60000, draft.dayEnd);
+    const sessions = this.timeline.mergeSessions(draft.sessions);
+    const overlap = this.timeline.getCoveredMilliseconds(sessions, start, end);
+    const removalBudget = Math.floor(Math.min(overlap, draft.seconds * 1000) / 1000) * 1000;
+    if (removalBudget <= 0) {
+      this.setEditorMessage('Select work time to remove.');
+      return;
+    }
+
+    let remaining = removalBudget;
+    const updatedSessions = [];
+    sessions.forEach(session => {
+      const overlapStart = Math.max(session.start, start);
+      const overlapEnd = Math.min(session.end, end);
+      const removed = Math.min(Math.max(0, overlapEnd - overlapStart), remaining);
+      if (removed <= 0) {
+        updatedSessions.push(session);
+        return;
+      }
+
+      const removedEnd = overlapStart + removed;
+      if (session.start < overlapStart) {
+        updatedSessions.push({ start: session.start, end: overlapStart, manual: session.manual });
+      }
+      if (removedEnd < session.end) {
+        updatedSessions.push({ start: removedEnd, end: session.end, manual: session.manual });
+      }
+      remaining -= removed;
+    });
+
+    const removedSeconds = Math.floor(removalBudget / 1000);
+    draft.sessions = updatedSessions;
+    draft.seconds = Math.max(0, draft.seconds - removedSeconds);
+    draft.netAdjustments -= removedSeconds;
+    draft.dirty = true;
+    this.setEditorMessage(`Removed ${Utils.formatTime(removedSeconds)} from this day.`);
+    this.updateEditor(draft);
+  }
+
+  setEditorMessage(message) {
+    const messageElement = this.activeCard?.querySelector('.history-editor-message');
+    if (messageElement) messageElement.textContent = message;
+  }
+
+  saveDraft(draft) {
+    const workTimes = StorageManager.getWorkTimes();
+    workTimes[draft.dateKey] = draft.seconds;
+    StorageManager.setWorkTimes(workTimes);
+
+    const timelineData = StorageManager.getTimelineData();
+    timelineData[draft.dateKey] = draft.sessions;
+    StorageManager.setTimelineData(timelineData);
+
+    const adjustments = StorageManager.getNetAdjustments();
+    adjustments[draft.dateKey] = draft.netAdjustments;
+    StorageManager.setNetAdjustments(adjustments);
+
+    this.discardActive();
+    this.showHistory();
+  }
+
+  discardActive() {
+    if (!this.activeCard) return;
+    this.activeCard.classList.remove('is-expanded');
+    this.activeCard.querySelector('.history-row').setAttribute('aria-expanded', 'false');
+    this.activeCard.querySelector('.history-editor').hidden = true;
+    this.activeCard = null;
+    this.activeDraft = null;
   }
 
   formatDateDisplay(date) {
@@ -886,14 +1132,21 @@ class History {
     });
 
     historyCollapse.addEventListener('hide.bs.collapse', () => {
+      this.discardActive();
       historyToggleText.textContent = 'Show History';
       historyToggleIcon.textContent = '▼';
+    });
+
+    document.addEventListener('pointerdown', (event) => {
+      if (this.activeCard && !this.activeCard.contains(event.target)) {
+        this.discardActive();
+      }
     });
   }
 
   refresh() {
     const historyCollapse = document.getElementById('historyCollapse');
-    if (historyCollapse.classList.contains('show')) {
+    if (!this.activeDraft && historyCollapse.classList.contains('show')) {
       this.showHistory();
     }
   }
@@ -983,7 +1236,7 @@ class WorkTimeTracker {
   initializeModules() {
     this.timer = new Timer();
     this.timeline = new Timeline(this.timer);
-    this.history = new History();
+    this.history = new History(this.timeline);
     this.uiManager = new UIManager(this.timer);
   }
 
