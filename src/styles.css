@@ -391,7 +391,13 @@ input {
   background: rgba(216, 255, 82, 0.62);
   box-shadow: 0 0 8px rgba(216, 255, 82, 0.3);
   animation: selectionPulse 1.8s ease-in-out infinite;
-  pointer-events: none;
+  cursor: grab;
+  pointer-events: auto;
+  touch-action: none;
+}
+
+.timeline-bar.is-dragging .timeline-selection-marker {
+  cursor: grabbing;
 }
 
 @keyframes selectionPulse {

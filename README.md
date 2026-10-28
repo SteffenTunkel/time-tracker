@@ -37,7 +37,7 @@ work-time-tracker/
 
 ### Timeline Features
 - **Session Times**: Current-day start and estimated finish appear above the timeline
-- **Point Adjustments**: Click the timeline or enter a time, then add time in an open interval or remove time from a session
+- **Point Adjustments**: Click or drag the timeline cursor, or enter a time, then add time in an open interval or remove time from a session
 - **Past Days**: History shows each recorded day's first start, last finish, and total; days without interval data show "Not recorded"
 - **History Editing**: Click a past day to edit its timeline and total; Save commits the draft, while Discard or clicking outside closes it without saving
 - **Auto-scaling**: Timeline adjusts to show your work pattern

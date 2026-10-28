@@ -385,6 +385,11 @@ class Timeline {
     this.adjustmentMessage = document.getElementById('timelineAdjustmentMessage');
     this.selectedTimestamp = Date.now();
     this.currentTimeRange = null;
+    this.isDraggingSelection = false;
+    this.dragTimeRange = null;
+    this.dragPointerOffset = 0;
+    this.dragMovedSelection = false;
+    this.ignoreNextTimelineClick = false;
     
     this.adjustmentTimeInput.value = this.formatTimeInput(this.selectedTimestamp);
     this.setupEventListeners();
@@ -412,7 +417,10 @@ class Timeline {
         end: sessionEnd
       };
       
-      StorageManager.addTimelineSession(session);
+      StorageManager.setTodayTimeline(this.mergeSessions([
+        ...StorageManager.getTodayTimeline(),
+        session
+      ]));
       console.log(`Saved work session from ${Utils.formatDisplayTime(sessionStart)} to ${Utils.formatDisplayTime(sessionEnd)}`);
     }
   }
@@ -423,10 +431,12 @@ class Timeline {
     
     const todayData = StorageManager.getTodayTimeline();
     
-    if (todayData.length === 0 && !this.timer.isRunning()) {
+    if (todayData.length === 0 && !this.timer.isRunning() && !this.isDraggingSelection) {
       this.renderDefaultView();
     } else {
-      const timeRange = this.calculateTimeRange(todayData);
+      const timeRange = this.isDraggingSelection && this.dragTimeRange
+        ? this.dragTimeRange
+        : this.calculateTimeRange(todayData);
       this.currentTimeRange = timeRange;
       this.renderTimelineLabels(timeRange);
       this.renderTimelineTicks(timeRange);
@@ -602,11 +612,68 @@ class Timeline {
 
   setupEventListeners() {
     this.timelineBar.addEventListener('click', (event) => {
+      if (this.ignoreNextTimelineClick) {
+        this.ignoreNextTimelineClick = false;
+        return;
+      }
       const bounds = this.timelineBar.getBoundingClientRect();
       const position = Math.min(1, Math.max(0, (event.clientX - bounds.left) / bounds.width));
       const timestamp = this.currentTimeRange.timelineStart + position * this.currentTimeRange.timelineDuration;
       this.selectAdjustmentTime(Math.round(timestamp / 60000) * 60000);
     });
+
+    this.timelineBar.addEventListener('pointerdown', (event) => {
+      if (!event.target.closest('.timeline-selection-marker') || event.button !== 0) return;
+
+      const bounds = this.timelineBar.getBoundingClientRect();
+      const markerLeft = Number.parseFloat(event.target.style.left) || 0;
+      event.preventDefault();
+      this.isDraggingSelection = true;
+      this.dragTimeRange = this.currentTimeRange;
+      this.dragPointerOffset = event.clientX - bounds.left - markerLeft;
+      this.dragMovedSelection = false;
+      this.timelineBar.classList.add('is-dragging');
+      this.timelineBar.setPointerCapture(event.pointerId);
+    });
+
+    this.timelineBar.addEventListener('pointermove', (event) => {
+      if (!this.isDraggingSelection || !this.dragTimeRange) return;
+
+      const bounds = this.timelineBar.getBoundingClientRect();
+      const trackWidth = bounds.width;
+      const { timelineStart, timelineDuration } = this.dragTimeRange;
+      const previewDuration = Math.min(this.getAdjustmentMinutes() * 60000, timelineDuration);
+      const previewWidth = Math.min(trackWidth, Math.max(4, (previewDuration / timelineDuration) * trackWidth));
+      const markerLeft = Math.max(0, Math.min(
+        event.clientX - bounds.left - this.dragPointerOffset,
+        trackWidth - previewWidth
+      ));
+      const timestamp = timelineStart + (markerLeft / trackWidth) * timelineDuration;
+      const nextSelection = Math.round(timestamp / 60000) * 60000;
+
+      if (nextSelection !== this.selectedTimestamp) {
+        this.dragMovedSelection = true;
+        this.selectAdjustmentTime(nextSelection);
+      }
+    });
+
+    const finishSelectionDrag = (event) => {
+      if (!this.isDraggingSelection) return;
+
+      this.isDraggingSelection = false;
+      this.dragTimeRange = null;
+      this.timelineBar.classList.remove('is-dragging');
+      if (this.timelineBar.hasPointerCapture(event.pointerId)) {
+        this.timelineBar.releasePointerCapture(event.pointerId);
+      }
+      if (this.dragMovedSelection) {
+        this.ignoreNextTimelineClick = true;
+        this.updateTimeline();
+      }
+    };
+
+    this.timelineBar.addEventListener('pointerup', finishSelectionDrag);
+    this.timelineBar.addEventListener('pointercancel', finishSelectionDrag);
 
     this.adjustmentTimeInput.addEventListener('input', () => {
       const [hours, minutes] = this.adjustmentTimeInput.value.split(':').map(Number);
@@ -660,7 +727,7 @@ class Timeline {
     marker.style.left = `${previewLeft}px`;
     marker.style.width = `${previewWidth}px`;
     marker.title = `${this.getAdjustmentMinutes()} min. from ${Utils.formatDisplayTime(this.selectedTimestamp)}`;
-    marker.setAttribute('aria-label', `Selected ${this.getAdjustmentMinutes()} minute adjustment window starting at ${Utils.formatDisplayTime(this.selectedTimestamp)}`);
+    marker.setAttribute('aria-hidden', 'true');
     this.timelineBar.appendChild(marker);
   }
 
@@ -714,18 +781,17 @@ class Timeline {
     const wasRunning = this.timer.isRunning();
     const runningSession = wasRunning ? { start: this.timer.startTime, end: now } : null;
     const overlapsRunningSession = runningSession && start <= runningSession.end && end >= runningSession.start;
-    if (overlapsRunningSession) this.timer.pause();
 
     const sessions = StorageManager.getTodayTimeline();
     const intervalsForCoverage = [...sessions];
-    if (this.timer.isRunning()) {
-      intervalsForCoverage.push({ start: this.timer.startTime, end: Date.now() });
-    }
+    if (runningSession) intervalsForCoverage.push(runningSession);
 
     const requestedMilliseconds = end - start;
     const coveredMilliseconds = this.getCoveredMilliseconds(intervalsForCoverage, start, end);
     const addedSeconds = Math.floor((requestedMilliseconds - coveredMilliseconds) / 1000);
-    const updatedSessions = this.mergeSessions([...sessions, { start, end, manual: true }]);
+    const sessionsToMerge = [...sessions, { start, end, manual: true }];
+    if (overlapsRunningSession) sessionsToMerge.push(runningSession);
+    const updatedSessions = this.mergeSessions(sessionsToMerge);
     StorageManager.setTodayTimeline(updatedSessions);
     if (addedSeconds > 0) this.timer.adjustTime(addedSeconds);
 
@@ -733,7 +799,6 @@ class Timeline {
       ? `Added ${Utils.formatTime(addedSeconds)} at ${Utils.formatDisplayTime(start)}${cappedAtNow ? ' through now' : ''}.`
       : 'Window already tracked; connected sessions merged.';
     this.updateTimeline();
-    if (overlapsRunningSession && wasRunning) this.timer.start();
   }
 
   removeTimeAtSelection() {
