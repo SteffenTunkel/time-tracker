@@ -4,53 +4,106 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Work Time Tracker</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
   <link rel="stylesheet" href="src/styles.css">
 </head>
-<body class="bg-light">
-  <div class="container">
-    <div class="row justify-content-center">
-      <div class="col-md-8 col-lg-6">
-        <div class="text-center py-4">
-          <h1 class="display-4 mb-4">Work Time Tracker</h1>
-          <div id="timer" class="mb-4">00:00:00</div>
-          
-          <div class="timer-controls">
-            <button id="startPauseBtn" class="btn btn-primary btn-lg me-3">Start</button>
-            <button id="resetBtn" class="btn btn-outline-secondary">Reset</button>
-          </div>
-          
-          <div class="manual-controls">
-            <div class="input-group justify-content-center">
-              <input type="number" id="manualMinutes" class="form-control" value="10" style="max-width: 80px;">
-              <button id="addBtn" class="btn btn-outline-success">+ 10 Min</button>
-              <button id="subtractBtn" class="btn btn-outline-danger">- 10 Min</button>
-            </div>
-          </div>
-
-          <div class="timeline-section">
-            <h5>Today's Activity Timeline</h5>
-            <div class="timeline-labels"></div>
-            <div class="timeline-bar" id="timelineBar"></div>
-            <div class="text-center mt-3">
-              <div>Net Manual Adjustments: <span id="netAdjustments" class="net-time">+00:00</span></div>
-            </div>
-          </div>
-
-          <div class="history-section">
-            <div class="text-center">
-              <button class="btn btn-outline-secondary mb-3" type="button" data-bs-toggle="collapse" data-bs-target="#historyCollapse" aria-expanded="false" aria-controls="historyCollapse">
-                <span id="historyToggleText">Show History</span>
-                <i id="historyToggleIcon" class="ms-2">▼</i>
-              </button>
-            </div>
-            <div class="collapse" id="historyCollapse">
-              <h5 class="text-center mb-3">Last 7 Days</h5>
-              <ul id="historyList" class="list-group"></ul>
-            </div>
-          </div>
+<body>
+  <div class="app-shell">
+    <header class="app-header">
+      <div class="brand-lockup">
+        <div class="brand-mark" aria-hidden="true">W</div>
+        <div>
+          <p class="eyebrow">DAILY WORK LOG</p>
+          <h1>Work Time Tracker</h1>
         </div>
       </div>
+    </header>
+
+    <main>
+      <section class="timer-panel" aria-labelledby="timerHeading">
+        <div class="timer-panel-heading">
+          <div>
+            <p class="eyebrow">TODAY'S TOTAL</p>
+            <h2 id="timerHeading">Work time</h2>
+          </div>
+          <time id="todayDate" class="timer-panel-index"></time>
+        </div>
+        <div class="timer-panel-controls">
+          <div id="timer" aria-live="polite">00:00:00</div>
+          <div class="timer-controls">
+            <button id="startPauseBtn" class="timer-action timer-action-primary" type="button">Start</button>
+            <button id="resetBtn" class="timer-action timer-action-secondary" type="button">Reset</button>
+          </div>
+        </div>
+        <div class="day-summary">
+          <div class="day-summary-item">
+            <span>START</span>
+            <strong id="todayStart">—</strong>
+          </div>
+          <div class="day-summary-item">
+            <span>EST. END</span>
+            <strong id="estimatedEnd">—</strong>
+          </div>
+          <label class="day-summary-target" for="workdayTarget">
+            <span>TARGET</span>
+            <select id="workdayTarget">
+              <option value="6">6 hours</option>
+              <option value="7">7 hours</option>
+              <option value="7.5">7.5 hours</option>
+              <option value="8" selected>8 hours</option>
+              <option value="9">9 hours</option>
+            </select>
+          </label>
+        </div>
+      </section>
+
+      <section class="timeline-section" aria-labelledby="timelineHeading">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">THE SHAPE OF YOUR DAY</p>
+            <h2 id="timelineHeading">Activity timeline</h2>
+          </div>
+          <span class="section-index">TODAY</span>
+        </div>
+        <div class="timeline-labels"></div>
+        <div class="timeline-bar" id="timelineBar"></div>
+        <div class="timeline-net-row">
+          <div class="adjustment-total">NET ADJUSTMENT <span id="netAdjustments" class="net-time">+00:00</span></div>
+        </div>
+        <div class="timeline-adjuster">
+          <label class="timeline-adjuster-time" for="adjustmentTime">
+            <span>AT</span>
+            <input id="adjustmentTime" type="time" aria-label="Adjustment time">
+          </label>
+          <label class="timeline-adjuster-minutes" for="manualMinutes">
+            <span>MIN</span>
+            <input type="number" id="manualMinutes" value="10" min="1" inputmode="numeric">
+          </label>
+          <button id="addBtn" class="adjustment-action adjustment-add" type="button" title="Add work time at selected point">+ 10 Min</button>
+          <button id="subtractBtn" class="adjustment-action adjustment-subtract" type="button" title="Remove work time from selected point">- 10 Min</button>
+          <span id="timelineAdjustmentMessage" class="timeline-adjustment-message" role="status" aria-live="polite"></span>
+        </div>
+      </section>
+
+      <section class="history-section" aria-labelledby="historyHeading">
+        <div class="history-heading">
+          <div>
+            <p class="eyebrow">LOOKING BACK</p>
+            <h2 id="historyHeading">Recent days</h2>
+          </div>
+          <button class="history-toggle" type="button" data-bs-toggle="collapse" data-bs-target="#historyCollapse" aria-expanded="false" aria-controls="historyCollapse">
+            <span id="historyToggleText">Show History</span>
+            <i id="historyToggleIcon" aria-hidden="true">▼</i>
+          </button>
+        </div>
+        <div class="collapse" id="historyCollapse">
+          <h3 class="visually-hidden">Last 7 Days</h3>
+          <ul id="historyList" class="list-group history-list"></ul>
+        </div>
+      </section>
     </div>
   </div>
 

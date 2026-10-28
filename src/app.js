@@ -13,7 +13,8 @@ const CONFIG = {
     WORK_TIMES: 'worktimes',
     TIMER_STATE: 'timerState',
     TIMELINE_DATA: 'timelineData',
-    NET_ADJUSTMENTS: 'netAdjustments'
+    NET_ADJUSTMENTS: 'netAdjustments',
+    WORKDAY_TARGET: 'workdayTarget'
   }
 };
 
@@ -28,6 +29,13 @@ const Utils = {
 
   getTodayString() {
     return new Date().toISOString().slice(0, 10);
+  },
+
+  getISOWeekNumber(date) {
+    const utcDate = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+    utcDate.setUTCDate(utcDate.getUTCDate() + 4 - (utcDate.getUTCDay() || 7));
+    const yearStart = new Date(Date.UTC(utcDate.getUTCFullYear(), 0, 1));
+    return Math.ceil(((utcDate - yearStart) / 86400000 + 1) / 7);
   },
 
   getDayStart(dateString) {
@@ -121,6 +129,12 @@ const StorageManager = {
     return timelineData[today] || [];
   },
 
+  setTodayTimeline(sessions) {
+    const timelineData = this.getTimelineData();
+    timelineData[Utils.getTodayString()] = sessions;
+    this.setTimelineData(timelineData);
+  },
+
   addTimelineSession(session) {
     const timelineData = this.getTimelineData();
     const today = Utils.getTodayString();
@@ -159,6 +173,14 @@ const StorageManager = {
     const today = Utils.getTodayString();
     adjustments[today] = seconds;
     this.setNetAdjustments(adjustments);
+  },
+
+  getWorkdayTarget() {
+    return Number(localStorage.getItem(CONFIG.STORAGE_KEYS.WORKDAY_TARGET)) || 8;
+  },
+
+  setWorkdayTarget(hours) {
+    localStorage.setItem(CONFIG.STORAGE_KEYS.WORKDAY_TARGET, String(hours));
   },
 
   clearTodayNetAdjustments() {
@@ -263,16 +285,17 @@ class Timer {
   }
 
   adjustTime(seconds) {
-    this.elapsed += seconds;
-    this.netAdjustments += seconds;
-    
-    if (this.elapsed < 0) this.elapsed = 0;
+    const currentElapsed = this.getCurrentElapsed();
+    const adjustedSeconds = Math.max(0, currentElapsed + seconds) - currentElapsed;
+    this.elapsed += adjustedSeconds;
+    this.netAdjustments += adjustedSeconds;
     
     this.updateDisplay();
     this.saveToStorage();
     this.triggerUpdate();
     
-    console.log(`Timer adjusted by ${seconds} seconds`);
+    console.log(`Timer adjusted by ${adjustedSeconds} seconds`);
+    return adjustedSeconds;
   }
 
   getNetAdjustmentsInfo() {
@@ -341,16 +364,6 @@ class Timer {
       this.reset();
     });
 
-    document.getElementById('addBtn').addEventListener('click', () => {
-      const minutes = parseInt(document.getElementById('manualMinutes').value) || 10;
-      this.adjustTime(minutes * 60);
-    });
-
-    document.getElementById('subtractBtn').addEventListener('click', () => {
-      const minutes = parseInt(document.getElementById('manualMinutes').value) || 10;
-      this.adjustTime(-minutes * 60);
-    });
-
     const manualMinutesInput = document.getElementById('manualMinutes');
     manualMinutesInput.addEventListener('input', this.updateButtonText);
 
@@ -377,7 +390,14 @@ class Timeline {
     
     this.timelineBar = document.getElementById('timelineBar');
     this.timelineLabels = document.querySelector('.timeline-labels');
+    this.adjustmentTimeInput = document.getElementById('adjustmentTime');
+    this.adjustmentMinutesInput = document.getElementById('manualMinutes');
+    this.adjustmentMessage = document.getElementById('timelineAdjustmentMessage');
+    this.selectedTimestamp = Date.now();
+    this.currentTimeRange = null;
     
+    this.adjustmentTimeInput.value = this.formatTimeInput(this.selectedTimestamp);
+    this.setupEventListeners();
     this.updateTimeline();
     this.setupPeriodicUpdate();
   }
@@ -408,7 +428,6 @@ class Timeline {
   }
 
   updateTimeline() {
-    const today = Utils.getTodayString();
     this.timelineBar.innerHTML = '';
     this.timelineLabels.innerHTML = '';
     
@@ -416,28 +435,40 @@ class Timeline {
     
     if (todayData.length === 0 && !this.timer.isRunning()) {
       this.renderDefaultView();
-      return;
+    } else {
+      const timeRange = this.calculateTimeRange(todayData);
+      this.currentTimeRange = timeRange;
+      this.renderTimelineLabels(timeRange);
+      this.renderTimelineTicks(timeRange);
+      this.renderCompletedSessions(todayData, timeRange);
+      this.renderCurrentSession(timeRange);
     }
     
-    const timeRange = this.calculateTimeRange(todayData);
-    this.renderTimelineLabels(timeRange);
-    this.renderTimelineTicks(timeRange);
-    this.renderCompletedSessions(todayData, timeRange);
-    this.renderCurrentSession(timeRange);
+    this.renderSelectionMarker();
   }
 
   renderDefaultView() {
+    const dayStart = Utils.getDayStart(Utils.getTodayString());
+    this.currentTimeRange = {
+      dayStart,
+      startHour: 0,
+      endHour: 24,
+      timelineStart: dayStart,
+      timelineEnd: dayStart + 24 * 60 * 60 * 1000,
+      timelineDuration: 24 * 60 * 60 * 1000
+    };
     const defaultHours = [0, 6, 12, 18, 24];
     defaultHours.forEach((hour, index) => {
       const percent = (index / (defaultHours.length - 1)) * 100;
       this.createTimelineLabel(percent, `${String(hour).padStart(2, '0')}:00`);
     });
+    this.renderTimelineTicks(this.currentTimeRange);
   }
 
   calculateTimeRange(todayData) {
     const dayStart = Utils.getDayStart(Utils.getTodayString());
-    let earliestTime = Date.now();
-    let latestTime = Date.now();
+    let earliestTime = Math.min(Date.now(), this.selectedTimestamp);
+    let latestTime = Math.max(Date.now(), this.selectedTimestamp + this.getAdjustmentMinutes() * 60 * 1000);
     
     todayData.forEach(session => {
       earliestTime = Math.min(earliestTime, session.start);
@@ -505,7 +536,7 @@ class Timeline {
         this.createTimelineSegment({
           leftPercent,
           widthPercent,
-          color: '#28a745',
+          color: '#43a77e',
           tooltip: this.createSessionTooltip(session),
           isCurrent: false
         });
@@ -527,7 +558,7 @@ class Timeline {
       this.createTimelineSegment({
         leftPercent,
         widthPercent,
-        color: '#28a745',
+          color: '#43a77e',
         tooltip: this.createCurrentSessionTooltip(currentStart, currentEnd),
         isCurrent: true
       });
@@ -558,7 +589,9 @@ class Timeline {
     segment.style.width = widthPercent + '%';
     segment.style.backgroundColor = color;
     segment.title = tooltip;
-    segment.style.cursor = 'help';
+    segment.tabIndex = 0;
+    segment.setAttribute('aria-label', tooltip);
+    segment.style.cursor = 'crosshair';
     
     this.timelineBar.appendChild(segment);
   }
@@ -575,6 +608,200 @@ class Timeline {
     const currentTimeStr = Utils.formatDisplayTime(end);
     const duration = Utils.getDurationInMinutes(start, end);
     return `${startTimeStr} - ${currentTimeStr} (${duration} min.) - In progress`;
+  }
+
+  setupEventListeners() {
+    this.timelineBar.addEventListener('click', (event) => {
+      const bounds = this.timelineBar.getBoundingClientRect();
+      const position = Math.min(1, Math.max(0, (event.clientX - bounds.left) / bounds.width));
+      const timestamp = this.currentTimeRange.timelineStart + position * this.currentTimeRange.timelineDuration;
+      this.selectAdjustmentTime(Math.round(timestamp / 60000) * 60000);
+    });
+
+    this.adjustmentTimeInput.addEventListener('input', () => {
+      const [hours, minutes] = this.adjustmentTimeInput.value.split(':').map(Number);
+      const selectedDate = new Date();
+      selectedDate.setHours(hours || 0, minutes || 0, 0, 0);
+      this.selectedTimestamp = selectedDate.getTime();
+      this.adjustmentMessage.textContent = '';
+      this.updateTimeline();
+    });
+
+    this.adjustmentMinutesInput.addEventListener('input', () => {
+      this.updateTimeline();
+    });
+
+    document.getElementById('addBtn').addEventListener('click', () => {
+      this.addTimeAtSelection();
+    });
+
+    document.getElementById('subtractBtn').addEventListener('click', () => {
+      this.removeTimeAtSelection();
+    });
+  }
+
+  selectAdjustmentTime(timestamp) {
+    this.selectedTimestamp = timestamp;
+    this.adjustmentTimeInput.value = this.formatTimeInput(timestamp);
+    this.adjustmentMessage.textContent = '';
+    this.updateTimeline();
+  }
+
+  formatTimeInput(timestamp) {
+    const date = new Date(timestamp);
+    return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+  }
+
+  renderSelectionMarker() {
+    if (!this.currentTimeRange) return;
+    const { timelineStart, timelineEnd, timelineDuration } = this.currentTimeRange;
+    if (this.selectedTimestamp < timelineStart || this.selectedTimestamp > timelineEnd) return;
+
+    const trackWidth = this.timelineBar.getBoundingClientRect().width;
+    if (trackWidth <= 0) return;
+
+    const requestedDuration = this.getAdjustmentMinutes() * 60 * 1000;
+    const previewDuration = Math.min(requestedDuration, timelineDuration);
+    const previewWidth = Math.min(trackWidth, Math.max(4, (previewDuration / timelineDuration) * trackWidth));
+    const selectedOffset = ((this.selectedTimestamp - timelineStart) / timelineDuration) * trackWidth;
+    const previewLeft = Math.max(0, Math.min(selectedOffset, trackWidth - previewWidth));
+    const marker = document.createElement('div');
+    marker.className = 'timeline-selection-marker';
+    marker.style.left = `${previewLeft}px`;
+    marker.style.width = `${previewWidth}px`;
+    marker.title = `${this.getAdjustmentMinutes()} min. from ${Utils.formatDisplayTime(this.selectedTimestamp)}`;
+    marker.setAttribute('aria-label', `Selected ${this.getAdjustmentMinutes()} minute adjustment window starting at ${Utils.formatDisplayTime(this.selectedTimestamp)}`);
+    this.timelineBar.appendChild(marker);
+  }
+
+  getAdjustmentMinutes() {
+    const minutes = Number.parseInt(this.adjustmentMinutesInput.value, 10);
+    return Number.isFinite(minutes) && minutes > 0 ? minutes : 10;
+  }
+
+  mergeSessions(sessions) {
+    const orderedSessions = sessions
+      .filter(session => Number.isFinite(session.start) && Number.isFinite(session.end) && session.end > session.start)
+      .map(session => ({ ...session }))
+      .sort((left, right) => left.start - right.start);
+    const mergedSessions = [];
+
+    orderedSessions.forEach(session => {
+      const previousSession = mergedSessions[mergedSessions.length - 1];
+      if (!previousSession || session.start > previousSession.end) {
+        mergedSessions.push(session);
+        return;
+      }
+
+      previousSession.end = Math.max(previousSession.end, session.end);
+      previousSession.manual = Boolean(previousSession.manual && session.manual);
+    });
+
+    return mergedSessions;
+  }
+
+  getCoveredMilliseconds(sessions, start, end) {
+    return this.mergeSessions(sessions).reduce((total, session) => {
+      return total + Math.max(0, Math.min(session.end, end) - Math.max(session.start, start));
+    }, 0);
+  }
+
+  addTimeAtSelection() {
+    const minutes = this.getAdjustmentMinutes();
+    const start = this.selectedTimestamp;
+    const requestedEnd = start + minutes * 60 * 1000;
+    const now = Date.now();
+    const dayStart = Utils.getDayStart(Utils.getTodayString());
+    const dayEnd = dayStart + 24 * 60 * 60 * 1000;
+    const end = Math.min(requestedEnd, now, dayEnd);
+    const cappedAtNow = requestedEnd > now;
+
+    if (start >= now || end <= start) {
+      this.adjustmentMessage.textContent = 'Select a start time before now.';
+      return;
+    }
+
+    const wasRunning = this.timer.isRunning();
+    const runningSession = wasRunning ? { start: this.timer.startTime, end: now } : null;
+    const overlapsRunningSession = runningSession && start <= runningSession.end && end >= runningSession.start;
+    if (overlapsRunningSession) this.timer.pause();
+
+    const sessions = StorageManager.getTodayTimeline();
+    const intervalsForCoverage = [...sessions];
+    if (this.timer.isRunning()) {
+      intervalsForCoverage.push({ start: this.timer.startTime, end: Date.now() });
+    }
+
+    const requestedMilliseconds = end - start;
+    const coveredMilliseconds = this.getCoveredMilliseconds(intervalsForCoverage, start, end);
+    const addedSeconds = Math.floor((requestedMilliseconds - coveredMilliseconds) / 1000);
+    const updatedSessions = this.mergeSessions([...sessions, { start, end, manual: true }]);
+    StorageManager.setTodayTimeline(updatedSessions);
+    if (addedSeconds > 0) this.timer.adjustTime(addedSeconds);
+
+    this.adjustmentMessage.textContent = addedSeconds > 0
+      ? `Added ${Utils.formatTime(addedSeconds)} at ${Utils.formatDisplayTime(start)}${cappedAtNow ? ' through now' : ''}.`
+      : 'Window already tracked; connected sessions merged.';
+    this.updateTimeline();
+    if (overlapsRunningSession && wasRunning) this.timer.start();
+  }
+
+  removeTimeAtSelection() {
+    const minutes = this.getAdjustmentMinutes();
+    const selectedTime = this.selectedTimestamp;
+    const selectedEnd = selectedTime + minutes * 60 * 1000;
+    const wasRunning = this.timer.isRunning();
+    const runningSession = wasRunning ? { start: this.timer.startTime, end: Date.now() } : null;
+    const savedSessions = StorageManager.getTodayTimeline();
+    const intersectsSavedSession = savedSessions.some(session => selectedTime < session.end && selectedEnd > session.start);
+    const intersectsRunningSession = runningSession && selectedTime < runningSession.end && selectedEnd > runningSession.start;
+
+    if (!intersectsSavedSession && !intersectsRunningSession) {
+      this.adjustmentMessage.textContent = 'Select a work session to remove time.';
+      return;
+    }
+
+    if (intersectsRunningSession) this.timer.pause();
+
+    const sessions = this.mergeSessions(StorageManager.getTodayTimeline());
+    const totalOverlap = this.getCoveredMilliseconds(sessions, selectedTime, selectedEnd);
+    const removalBudget = Math.floor(Math.min(totalOverlap, this.timer.getCurrentElapsed() * 1000) / 1000) * 1000;
+    if (removalBudget <= 0) {
+      this.adjustmentMessage.textContent = 'No tracked time in that window can be removed.';
+      if (intersectsRunningSession && wasRunning) this.timer.start();
+      return;
+    }
+
+    let remainingRemoval = removalBudget;
+    const replacementSessions = [];
+    sessions.forEach(session => {
+      const overlapStart = Math.max(session.start, selectedTime);
+      const overlapEnd = Math.min(session.end, selectedEnd);
+      const removableDuration = Math.max(0, overlapEnd - overlapStart);
+      const removedFromSession = Math.min(removableDuration, remainingRemoval);
+
+      if (removedFromSession === 0) {
+        replacementSessions.push(session);
+        return;
+      }
+
+      const removedEnd = overlapStart + removedFromSession;
+      if (session.start < overlapStart) {
+        replacementSessions.push({ start: session.start, end: overlapStart, manual: session.manual });
+      }
+      if (removedEnd < session.end) {
+        replacementSessions.push({ start: removedEnd, end: session.end, manual: session.manual });
+      }
+      remainingRemoval -= removedFromSession;
+    });
+
+    StorageManager.setTodayTimeline(replacementSessions);
+    const removedSeconds = Math.floor(removalBudget / 1000);
+    this.timer.adjustTime(-removedSeconds);
+
+    this.adjustmentMessage.textContent = `Removed ${Utils.formatTime(removedSeconds)} across intersecting work sessions.`;
+    this.updateTimeline();
+    if (intersectsRunningSession && wasRunning) this.timer.start();
   }
 
   onTimerPause() {
@@ -599,22 +826,42 @@ class History {
   showHistory() {
     this.historyList.innerHTML = '';
     const workTimes = StorageManager.getWorkTimes();
+    const timelineData = StorageManager.getTimelineData();
     const today = new Date();
+    const days = [];
     
     for (let i = 1; i <= 7; i++) {
       const date = new Date(today);
       date.setDate(today.getDate() - i);
       const key = date.toISOString().slice(0, 10);
       const time = workTimes[key] || 0;
+      const sessions = (timelineData[key] || []).filter(session => Number.isFinite(session.start) && Number.isFinite(session.end));
+      const firstStart = sessions.length ? Math.min(...sessions.map(session => session.start)) : null;
+      const lastEnd = sessions.length ? Math.max(...sessions.map(session => session.end)) : null;
+      days.push({ date, time, firstStart, lastEnd });
+    }
+
+    const maxTime = Math.max(1, ...days.map(day => day.time));
+    days.forEach(({ date, time, firstStart, lastEnd }) => {
+      const start = firstStart === null ? 'Not recorded' : Utils.formatDisplayTime(firstStart);
+      const end = lastEnd === null ? 'Not recorded' : Utils.formatDisplayTime(lastEnd);
+      const barWidth = time > 0 ? Math.max(2, (time / maxTime) * 100) : 0;
       
       const li = document.createElement('li');
-      li.className = 'list-group-item d-flex justify-content-between align-items-center';
+      li.className = 'history-row';
       li.innerHTML = `
-        <span>${this.formatDateDisplay(date)}</span>
-        <span class="badge bg-primary rounded-pill">${Utils.formatTime(time)}</span>
+        <div class="history-day">${this.formatDateDisplay(date)}</div>
+        <div class="history-session-times">
+          <span><small>START</small><strong>${start}</strong></span>
+          <span><small>END</small><strong>${end}</strong></span>
+        </div>
+        <div class="history-total">
+          <div class="history-bar"><span style="width: ${barWidth}%"></span></div>
+          <span class="history-duration">${Utils.formatTime(time)}</span>
+        </div>
       `;
       this.historyList.appendChild(li);
-    }
+    });
   }
 
   formatDateDisplay(date) {
@@ -658,17 +905,68 @@ class UIManager {
     this.timer = timer;
     
     this.netAdjustmentsDisplay = document.getElementById('netAdjustments');
+    this.todayDateDisplay = document.getElementById('todayDate');
+    this.todayStartDisplay = document.getElementById('todayStart');
+    this.estimatedEndDisplay = document.getElementById('estimatedEnd');
+    this.workdayTarget = document.getElementById('workdayTarget');
+    this.workdayTarget.value = String(StorageManager.getWorkdayTarget());
+    this.workdayTarget.addEventListener('change', () => {
+      StorageManager.setWorkdayTarget(Number(this.workdayTarget.value));
+      this.updateDaySummary();
+    });
     this.updateDisplays();
+    setInterval(() => this.updateDaySummary(), 60000);
   }
 
   updateDisplays() {
     this.updateNetAdjustmentsDisplay();
+    this.updateDaySummary();
   }
 
   updateNetAdjustmentsDisplay() {
     const adjustmentsInfo = this.timer.getNetAdjustmentsInfo();
     this.netAdjustmentsDisplay.textContent = adjustmentsInfo.timeStr;
     this.netAdjustmentsDisplay.className = `net-time ${adjustmentsInfo.isPositive ? 'positive' : 'negative'}`;
+  }
+
+  updateDaySummary() {
+    const today = new Date();
+    const dateLabel = today.toLocaleDateString('en-US', {
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric'
+    });
+    this.todayDateDisplay.textContent = `${dateLabel} · KW ${Utils.getISOWeekNumber(today)}`;
+    this.todayDateDisplay.dateTime = [
+      today.getFullYear(),
+      String(today.getMonth() + 1).padStart(2, '0'),
+      String(today.getDate()).padStart(2, '0')
+    ].join('-');
+
+    const sessions = StorageManager.getTodayTimeline();
+    const starts = sessions.map(session => session.start);
+    if (this.timer.isRunning()) starts.push(this.timer.startTime);
+    const firstStart = starts.length ? Math.min(...starts) : null;
+    this.todayStartDisplay.textContent = firstStart === null ? '—' : Utils.formatDisplayTime(firstStart);
+
+    const elapsed = this.timer.getCurrentElapsed();
+    if (elapsed <= 0) {
+      this.estimatedEndDisplay.textContent = '—';
+      return;
+    }
+
+    const targetSeconds = Number(this.workdayTarget.value) * 3600;
+    if (elapsed >= targetSeconds) {
+      this.estimatedEndDisplay.textContent = 'Target met';
+      return;
+    }
+
+    const estimatedEnd = new Date(Date.now() + (targetSeconds - elapsed) * 1000);
+    const endTime = Utils.formatDisplayTime(estimatedEnd.getTime());
+    const isTomorrow = estimatedEnd.toDateString() !== new Date().toDateString();
+    this.estimatedEndDisplay.textContent = isTomorrow
+      ? `${estimatedEnd.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}, ${endTime}`
+      : endTime;
   }
 
 }
@@ -723,9 +1021,10 @@ class WorkTimeTracker {
 
     const originalAdjustTime = this.timer.adjustTime.bind(this.timer);
     this.timer.adjustTime = (seconds) => {
-      originalAdjustTime(seconds);
+      const adjustedSeconds = originalAdjustTime(seconds);
       this.history.refresh();
       this.uiManager.updateDisplays();
+      return adjustedSeconds;
     };
   }
 }
