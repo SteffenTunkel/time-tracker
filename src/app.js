@@ -14,9 +14,21 @@ const CONFIG = {
     TIMER_STATE: 'timerState',
     TIMELINE_DATA: 'timelineData',
     NET_ADJUSTMENTS: 'netAdjustments',
-    WORKDAY_TARGET: 'workdayTarget'
+    WORKDAY_TARGET: 'workdayTarget',
+    WORK_LOCATIONS: 'workLocations'
   }
 };
+
+const WORK_LOCATION_OPTIONS = [
+  { value: 'homeoffice', label: 'Home office', symbol: '🏠' },
+  { value: 'office', label: 'Office', symbol: '🏢' }
+];
+
+function updateLocationToggle(toggle, selectedLocation) {
+  toggle.querySelectorAll('[data-work-location]').forEach(button => {
+    button.setAttribute('aria-pressed', String(button.dataset.workLocation === selectedLocation));
+  });
+}
 
 // Utility Functions
 const Utils = {
@@ -160,6 +172,22 @@ const StorageManager = {
 
   setNetAdjustments(adjustments) {
     this.setJSON(CONFIG.STORAGE_KEYS.NET_ADJUSTMENTS, adjustments);
+  },
+
+  getWorkLocations() {
+    return this.getJSON(CONFIG.STORAGE_KEYS.WORK_LOCATIONS, {});
+  },
+
+  getWorkLocation(dateKey) {
+    const location = this.getWorkLocations()[dateKey];
+    return WORK_LOCATION_OPTIONS.some(option => option.value === location) ? location : null;
+  },
+
+  setWorkLocation(dateKey, location) {
+    if (!WORK_LOCATION_OPTIONS.some(option => option.value === location)) return;
+    const locations = this.getWorkLocations();
+    locations[dateKey] = location;
+    this.setJSON(CONFIG.STORAGE_KEYS.WORK_LOCATIONS, locations);
   },
 
   getTodayNetAdjustments() {
@@ -885,6 +913,7 @@ class History {
     this.historyList.innerHTML = '';
     const workTimes = StorageManager.getWorkTimes();
     const timelineData = StorageManager.getTimelineData();
+    const workLocations = StorageManager.getWorkLocations();
     const today = new Date();
     const days = [];
     
@@ -893,14 +922,15 @@ class History {
       date.setDate(today.getDate() - i);
       const key = date.toISOString().slice(0, 10);
       const time = workTimes[key] || 0;
+      const location = WORK_LOCATION_OPTIONS.find(option => option.value === workLocations[key]);
       const sessions = (timelineData[key] || []).filter(session => Number.isFinite(session.start) && Number.isFinite(session.end));
       const firstStart = sessions.length ? Math.min(...sessions.map(session => session.start)) : null;
       const lastEnd = sessions.length ? Math.max(...sessions.map(session => session.end)) : null;
-      days.push({ key, date, time, firstStart, lastEnd });
+      days.push({ key, date, time, firstStart, lastEnd, location });
     }
 
     const maxTime = Math.max(1, ...days.map(day => day.time));
-    days.forEach(({ key, date, time, firstStart, lastEnd }) => {
+    days.forEach(({ key, date, time, firstStart, lastEnd, location }) => {
       const start = firstStart === null ? 'Not recorded' : Utils.formatDisplayTime(firstStart);
       const end = lastEnd === null ? 'Not recorded' : Utils.formatDisplayTime(lastEnd);
       const barWidth = time > 0 ? Math.max(2, (time / maxTime) * 100) : 0;
@@ -909,7 +939,10 @@ class History {
       li.className = 'history-card';
       li.innerHTML = `
         <div class="history-row" role="button" tabindex="0" aria-expanded="false" aria-controls="history-editor-${key}">
-          <div class="history-day">${this.formatDateDisplay(date)}</div>
+          <div class="history-day">
+            <span>${this.formatDateDisplay(date)}</span>
+            <span class="history-location-symbol" ${location ? `title="${location.label}" aria-label="Work location: ${location.label}"` : 'aria-hidden="true"'}>${location?.symbol || ''}</span>
+          </div>
           <div class="history-session-times">
             <span><small>START</small><strong>${start}</strong></span>
             <span><small>END</small><strong>${end}</strong></span>
@@ -954,6 +987,7 @@ class History {
       sessions,
       seconds: workTimes[dateKey] || 0,
       netAdjustments: adjustments[dateKey] || 0,
+      location: StorageManager.getWorkLocation(dateKey),
       selectedTime: firstStart,
       maxTime: Math.max(1, ...Object.values(workTimes)),
       dirty: false
@@ -970,6 +1004,12 @@ class History {
         <div>
           <p class="eyebrow">ACTIVITY TIMELINE</p>
           <strong>${this.formatDateDisplay(date)}</strong>
+        </div>
+        <div class="history-editor-location">
+          <span>LOCATION</span>
+          <div class="location-toggle history-editor-location-toggle" role="group" aria-label="Work location for ${this.formatDateDisplay(date)}">
+            ${WORK_LOCATION_OPTIONS.map(option => `<button type="button" data-work-location="${option.value}" aria-label="${option.label}" title="${option.label}" aria-pressed="false">${option.symbol}</button>`).join('')}
+          </div>
         </div>
         <span class="history-editor-hint">Click the timeline to choose a time</span>
       </div>
@@ -998,6 +1038,16 @@ class History {
     const timeInput = editor.querySelector('.history-editor-time');
     const minutesInput = editor.querySelector('.history-editor-minutes');
     const bar = editor.querySelector('.history-editor-bar');
+    const locationToggle = editor.querySelector('.history-editor-location-toggle');
+    updateLocationToggle(locationToggle, draft.location);
+    locationToggle.addEventListener('click', (event) => {
+      const button = event.target.closest('[data-work-location]');
+      if (!button) return;
+      draft.location = button.dataset.workLocation;
+      draft.dirty = true;
+      updateLocationToggle(locationToggle, draft.location);
+      this.updateEditor(draft);
+    });
     timeInput.value = this.timeline.formatTimeInput(draft.selectedTime);
     timeInput.addEventListener('input', () => {
       const [hours, minutes] = timeInput.value.split(':').map(Number);
@@ -1162,6 +1212,14 @@ class History {
     adjustments[draft.dateKey] = draft.netAdjustments;
     StorageManager.setNetAdjustments(adjustments);
 
+    const locations = StorageManager.getWorkLocations();
+    if (draft.location) {
+      locations[draft.dateKey] = draft.location;
+    } else {
+      delete locations[draft.dateKey];
+    }
+    StorageManager.setJSON(CONFIG.STORAGE_KEYS.WORK_LOCATIONS, locations);
+
     this.discardActive();
     this.showHistory();
   }
@@ -1227,6 +1285,20 @@ class UIManager {
     this.todayStartDisplay = document.getElementById('todayStart');
     this.estimatedEndDisplay = document.getElementById('estimatedEnd');
     this.workdayTarget = document.getElementById('workdayTarget');
+    this.workLocationToggle = document.getElementById('todayWorkLocationToggle');
+    const todayKey = Utils.getTodayString();
+    this.todayWorkLocation = StorageManager.getWorkLocation(todayKey) || 'office';
+    if (!StorageManager.getWorkLocation(todayKey)) {
+      StorageManager.setWorkLocation(todayKey, this.todayWorkLocation);
+    }
+    updateLocationToggle(this.workLocationToggle, this.todayWorkLocation);
+    this.workLocationToggle.addEventListener('click', (event) => {
+      const button = event.target.closest('[data-work-location]');
+      if (!button) return;
+      this.todayWorkLocation = button.dataset.workLocation;
+      StorageManager.setWorkLocation(Utils.getTodayString(), this.todayWorkLocation);
+      updateLocationToggle(this.workLocationToggle, this.todayWorkLocation);
+    });
     this.workdayTarget.value = String(StorageManager.getWorkdayTarget());
     this.workdayTarget.addEventListener('change', () => {
       StorageManager.setWorkdayTarget(Number(this.workdayTarget.value));

@@ -173,7 +173,7 @@ input {
 
 .day-summary {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 16px;
   margin-top: 23px;
   padding-top: 15px;
@@ -181,7 +181,8 @@ input {
 }
 
 .day-summary-item,
-.day-summary-target {
+.day-summary-target,
+.day-summary-location {
   display: grid;
   align-content: start;
   gap: 5px;
@@ -189,7 +190,9 @@ input {
 }
 
 .day-summary-item span,
-.day-summary-target > span {
+.day-summary-target > span,
+.day-summary-location > span,
+.history-editor-location > span {
   color: #a4b7aa;
   font-size: 9px;
   font-weight: 700;
@@ -201,6 +204,50 @@ input {
   font-size: 14px;
   font-weight: 500;
   font-variant-numeric: tabular-nums;
+}
+
+.location-toggle {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.location-toggle button {
+  display: grid;
+  width: 34px;
+  height: 32px;
+  place-items: center;
+  padding: 0;
+  border: 1px solid #50665a;
+  border-radius: 4px;
+  color: #d7e1d9;
+  background: transparent;
+  cursor: pointer;
+  font-size: 17px;
+  line-height: 1;
+  transition: background-color 140ms ease, border-color 140ms ease, color 140ms ease;
+}
+
+.location-toggle button[aria-pressed="true"] {
+  border-color: var(--lime);
+  color: var(--ink);
+  background: var(--lime);
+}
+
+.location-toggle button:focus-visible {
+  outline: 2px solid var(--lime);
+  outline-offset: 2px;
+}
+
+.history-editor-location-toggle button {
+  border-color: #b8c5bb;
+  color: var(--ink);
+  background: var(--paper);
+}
+
+.history-editor-location-toggle button[aria-pressed="true"] {
+  border-color: #9bab9e;
+  color: var(--ink);
+  background: #dcefe1;
 }
 
 #workdayTarget {
@@ -792,7 +839,17 @@ input {
 }
 
 .history-day {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   font-weight: 600;
+}
+
+.history-location-symbol {
+  flex: 0 0 24px;
+  font-size: 16px;
+  text-align: center;
 }
 
 .history-session-times {
@@ -802,6 +859,12 @@ input {
 
 .history-session-times span {
   display: grid;
+
+.history-editor-location {
+  display: grid;
+  justify-items: start;
+  gap: 5px;
+}
   gap: 3px;
   color: var(--ink);
   font-family: 'IBM Plex Mono', monospace;
@@ -895,6 +958,7 @@ input {
   }
 
   .day-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 9px;
   }
 
@@ -932,6 +996,14 @@ input {
 
   .history-editor {
     padding: 13px 10px 11px;
+  }
+
+  .history-editor-heading {
+    flex-wrap: wrap;
+  }
+
+  .history-editor-hint {
+    margin-left: auto;
   }
 
   .history-editor-controls {
@@ -975,9 +1047,6 @@ input {
     grid-template-columns: 1fr 1fr;
   }
 
-  .day-summary-target {
-    grid-column: 1 / -1;
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {

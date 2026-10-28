@@ -7,6 +7,7 @@ A simple work time tracker for recording daily hours.
 - ⏱️ **Timer Management**: Start, pause, and reset work timers
 - 📈 **Timeline Visualization**: See today's work sessions at a glance
 - 🕒 **Day Estimate**: View the first start time and estimated finish against an adjustable daily target
+- 🏢 **Work Location**: Track Office or Home office per day
 - ✚ **Timeline Adjustments**: Add or remove time at a selected point in the day
 - 💾 **Local Storage**: All data is stored locally in your browser
 - 📱 **Responsive Design**: Works on desktop and mobile devices
