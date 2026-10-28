@@ -5,20 +5,6 @@
 
 // Configuration Constants
 const CONFIG = {
-  PROJECT_COLORS: [
-    '#28a745', '#007bff', '#dc3545', '#ffc107', '#17a2b8',
-    '#6f42c1', '#e83e8c', '#fd7e14', '#20c997', '#6c757d'
-  ],
-  DEFAULT_PROJECT: {
-    ID: 'general-work',
-    NAME: 'General Work',
-    COLOR: '#28a745'
-  },
-  SYNC: {
-    TOLERANCE_SECONDS: 3,
-    CHECK_INTERVAL_SECONDS: 10,
-    AUTO_CORRECT_INTERVAL_SECONDS: 30
-  },
   TIMELINE: {
     UPDATE_INTERVAL_MS: 20000,
     MIN_SESSION_DURATION_MS: 1000
@@ -27,11 +13,7 @@ const CONFIG = {
     WORK_TIMES: 'worktimes',
     TIMER_STATE: 'timerState',
     TIMELINE_DATA: 'timelineData',
-    NET_ADJUSTMENTS: 'netAdjustments',
-    PROJECTS: 'projects',
-    PROJECT_TIMES: 'projectTimes',
-    PROJECT_STATES: 'projectStates',
-    ACTIVE_PROJECT: 'activeProject'
+    NET_ADJUSTMENTS: 'netAdjustments'
   }
 };
 
@@ -186,42 +168,6 @@ const StorageManager = {
     this.setNetAdjustments(adjustments);
   },
 
-  getProjects() {
-    return this.getJSON(CONFIG.STORAGE_KEYS.PROJECTS, []);
-  },
-
-  setProjects(projects) {
-    this.setJSON(CONFIG.STORAGE_KEYS.PROJECTS, projects);
-  },
-
-  getProjectTimes() {
-    return this.getJSON(CONFIG.STORAGE_KEYS.PROJECT_TIMES, {});
-  },
-
-  setProjectTimes(projectTimes) {
-    this.setJSON(CONFIG.STORAGE_KEYS.PROJECT_TIMES, projectTimes);
-  },
-
-  getProjectStates() {
-    return this.getJSON(CONFIG.STORAGE_KEYS.PROJECT_STATES, {});
-  },
-
-  setProjectStates(states) {
-    this.setJSON(CONFIG.STORAGE_KEYS.PROJECT_STATES, states);
-  },
-
-  getActiveProjectId() {
-    return localStorage.getItem(CONFIG.STORAGE_KEYS.ACTIVE_PROJECT) || null;
-  },
-
-  setActiveProjectId(projectId) {
-    if (projectId) {
-      localStorage.setItem(CONFIG.STORAGE_KEYS.ACTIVE_PROJECT, projectId);
-    } else {
-      localStorage.removeItem(CONFIG.STORAGE_KEYS.ACTIVE_PROJECT);
-    }
-  },
-
   clearTimerState() {
     localStorage.removeItem(CONFIG.STORAGE_KEYS.TIMER_STATE);
   }
@@ -265,17 +211,12 @@ class Timer {
   }
 
   start() {
-    if (this.startTime) return;
-    
-    this.startTime = Date.now();
+    if (this.timerInterval) return;
+    if (!this.startTime) this.startTime = Date.now();
     this.timerInterval = setInterval(() => {
       this.updateDisplay();
       this.triggerUpdate();
       
-      const now = new Date();
-      if (now.getSeconds() % CONFIG.SYNC.CHECK_INTERVAL_SECONDS === 0) {
-        this.triggerUpdate();
-      }
     }, 1000);
     
     this.startPauseBtn.textContent = 'Pause';
@@ -299,7 +240,7 @@ class Timer {
   }
 
   reset() {
-    if (!confirm("Reset today's time?")) return;
+    if (!confirm("Reset today's time?")) return false;
     
     this.startTime = null;
     this.elapsed = 0;
@@ -318,6 +259,7 @@ class Timer {
     
     this.triggerUpdate();
     console.log('Timer reset');
+    return true;
   }
 
   adjustTime(seconds) {
@@ -428,384 +370,10 @@ class Timer {
   }
 }
 
-// Project Manager Class
-class ProjectManager {
-  constructor(timer) {
-    this.timer = timer;
-    this.projects = [];
-    this.activeProject = null;
-    this.updateCallbacks = [];
-    
-    this.projectsList = document.getElementById('projectsList');
-    this.newProjectInput = document.getElementById('newProjectInput');
-    
-    this.loadProjects();
-    this.setupEventListeners();
-  }
-
-  onUpdate(callback) {
-    this.updateCallbacks.push(callback);
-  }
-
-  triggerUpdate() {
-    this.updateCallbacks.forEach(callback => callback());
-  }
-
-  getTotalProjectTime() {
-    return this.projects.reduce((total, project) => {
-      const currentTime = project.timeToday + (project.startTime ? Math.floor((Date.now() - project.startTime) / 1000) : 0);
-      return total + currentTime;
-    }, 0);
-  }
-
-  verifySynchronization() {
-    const totalProjectTime = this.getTotalProjectTime();
-    const mainTimerTime = this.timer.getCurrentElapsed();
-    const difference = Math.abs(totalProjectTime - mainTimerTime);
-    
-    if (difference > CONFIG.SYNC.TOLERANCE_SECONDS) {
-      console.warn(`Timer synchronization issue: Main ${Utils.formatTime(mainTimerTime)}, Projects ${Utils.formatTime(totalProjectTime)}, Diff: ${difference}s`);
-      return false;
-    }
-    
-    return true;
-  }
-
-  syncToMainTimer() {
-    const mainTimerTime = this.timer.getCurrentElapsed();
-    const totalProjectTime = this.getTotalProjectTime();
-    const difference = mainTimerTime - totalProjectTime;
-    
-    if (Math.abs(difference) > CONFIG.SYNC.TOLERANCE_SECONDS && this.activeProject) {
-      const wasRunning = this.activeProject.startTime !== null;
-      if (wasRunning && this.activeProject.startTime) {
-        this.activeProject.timeToday += Math.floor((Date.now() - this.activeProject.startTime) / 1000);
-        this.activeProject.startTime = null;
-      }
-      
-      this.activeProject.timeToday += difference;
-      if (this.activeProject.timeToday < 0) this.activeProject.timeToday = 0;
-      
-      if (wasRunning && this.timer.isRunning()) {
-        this.activeProject.startTime = Date.now();
-      }
-      
-      console.log(`Synchronized timers: Applied ${difference}s correction to ${this.activeProject.name}`);
-      this.renderProjects();
-      this.saveProjects();
-    }
-  }
-
-  createDefaultProject() {
-    return {
-      id: CONFIG.DEFAULT_PROJECT.ID,
-      name: CONFIG.DEFAULT_PROJECT.NAME,
-      color: CONFIG.DEFAULT_PROJECT.COLOR,
-      timeToday: 0,
-      startTime: null
-    };
-  }
-
-  loadProjects() {
-    const today = Utils.getTodayString();
-    const savedProjects = StorageManager.getProjects();
-    const savedProjectTimes = StorageManager.getProjectTimes();
-    const projectStates = StorageManager.getProjectStates();
-    const isToday = projectStates.date === today;
-    
-    if (savedProjects.length === 0 || !savedProjects.find(p => p.name === CONFIG.DEFAULT_PROJECT.NAME)) {
-      const defaultProject = {
-        id: CONFIG.DEFAULT_PROJECT.ID,
-        name: CONFIG.DEFAULT_PROJECT.NAME,
-        color: CONFIG.DEFAULT_PROJECT.COLOR
-      };
-      savedProjects.unshift(defaultProject);
-      StorageManager.setProjects(savedProjects);
-    }
-    
-    this.projects = savedProjects.map(project => ({
-      ...project,
-      timeToday: savedProjectTimes[today]?.[project.id] || 0,
-      startTime: null
-    }));
-    
-    if (isToday && projectStates.projectTimerStates) {
-      projectStates.projectTimerStates.forEach(state => {
-        const project = this.projects.find(p => p.id === state.id);
-        if (project) {
-          project.timeToday = state.timeToday || 0;
-          project.startTime = state.startTime;
-        }
-      });
-    }
-    
-    this.loadActiveProject();
-    this.renderProjects();
-    console.log('Projects loaded from storage');
-  }
-
-  loadActiveProject() {
-    const projectStates = StorageManager.getProjectStates();
-    const today = Utils.getTodayString();
-    const isToday = projectStates.date === today;
-    
-    let savedActiveProjectId = null;
-    if (isToday && projectStates.activeProjectId) {
-      savedActiveProjectId = projectStates.activeProjectId;
-    } else {
-      savedActiveProjectId = StorageManager.getActiveProjectId();
-    }
-    
-    if (savedActiveProjectId) {
-      const project = this.projects.find(p => p.id === savedActiveProjectId);
-      if (project) {
-        this.activeProject = project;
-        if (this.timer.isRunning() && !project.startTime) {
-          project.startTime = this.timer.startTime;
-        }
-      }
-    }
-    
-    if (!this.activeProject && this.projects.length > 0) {
-      const generalWork = this.projects.find(p => p.name === CONFIG.DEFAULT_PROJECT.NAME);
-      if (generalWork) {
-        this.activeProject = generalWork;
-        if (this.timer.isRunning() && !generalWork.startTime) {
-          generalWork.startTime = this.timer.startTime;
-        }
-      }
-    }
-  }
-
-  saveProjects() {
-    const today = Utils.getTodayString();
-    
-    const projectsToSave = this.projects.map(p => ({
-      id: p.id,
-      name: p.name,
-      color: p.color
-    }));
-    StorageManager.setProjects(projectsToSave);
-    
-    let projectTimes = StorageManager.getProjectTimes();
-    if (!projectTimes[today]) projectTimes[today] = {};
-    
-    this.projects.forEach(project => {
-      const currentTime = project.timeToday + (project.startTime ? Math.floor((Date.now() - project.startTime) / 1000) : 0);
-      projectTimes[today][project.id] = currentTime;
-    });
-    
-    StorageManager.setProjectTimes(projectTimes);
-    
-    const projectStates = {
-      activeProjectId: this.activeProject ? this.activeProject.id : null,
-      projectTimerStates: this.projects.map(p => ({
-        id: p.id,
-        timeToday: p.timeToday,
-        startTime: p.startTime
-      })),
-      date: today
-    };
-    StorageManager.setProjectStates(projectStates);
-    StorageManager.setActiveProjectId(this.activeProject ? this.activeProject.id : null);
-  }
-
-  renderProjects() {
-    this.projectsList.innerHTML = '';
-    
-    this.projects.forEach(project => {
-      const projectDiv = document.createElement('div');
-      projectDiv.className = `project-item ${this.activeProject?.id === project.id ? 'active' : ''}`;
-      projectDiv.style.backgroundColor = project.color + '20';
-      projectDiv.style.borderColor = project.color;
-      
-      const currentTime = project.timeToday + (project.startTime ? Math.floor((Date.now() - project.startTime) / 1000) : 0);
-      
-      const projectContent = document.createElement('div');
-      projectContent.style.display = 'flex';
-      projectContent.style.alignItems = 'center';
-      projectContent.style.justifyContent = 'space-between';
-      projectContent.style.width = '100%';
-      projectContent.onclick = () => this.selectProject(project.id);
-      
-      const projectName = document.createElement('span');
-      projectName.className = 'project-name';
-      projectName.style.color = project.color;
-      projectName.textContent = project.name;
-      
-      const projectControls = document.createElement('div');
-      projectControls.className = 'project-controls';
-      
-      if (project.name !== CONFIG.DEFAULT_PROJECT.NAME) {
-        const deleteBtn = document.createElement('button');
-        deleteBtn.className = 'project-delete-btn';
-        deleteBtn.innerHTML = '🗑️';
-        deleteBtn.title = 'Delete project';
-        deleteBtn.onclick = (e) => {
-          e.stopPropagation();
-          this.deleteProject(project.id);
-        };
-        projectControls.appendChild(deleteBtn);
-      }
-      
-      const projectTimer = document.createElement('span');
-      projectTimer.className = 'project-timer';
-      projectTimer.id = `project-timer-${project.id}`;
-      projectTimer.textContent = Utils.formatTime(currentTime);
-      projectControls.appendChild(projectTimer);
-      
-      projectContent.appendChild(projectName);
-      projectContent.appendChild(projectControls);
-      projectDiv.appendChild(projectContent);
-      
-      this.projectsList.appendChild(projectDiv);
-    });
-  }
-
-  updateProjectTimers() {
-    this.projects.forEach(project => {
-      const timerElement = document.getElementById(`project-timer-${project.id}`);
-      if (timerElement) {
-        const currentTime = project.timeToday + (project.startTime ? Math.floor((Date.now() - project.startTime) / 1000) : 0);
-        timerElement.textContent = Utils.formatTime(currentTime);
-      }
-    });
-  }
-
-  selectProject(projectId) {
-    console.log(`Switching to project: ${projectId}`);
-    
-    if (!this.verifySynchronization()) {
-      console.log('Correcting timer sync before project switch');
-      this.syncToMainTimer();
-    }
-    
-    if (this.activeProject && this.activeProject.startTime) {
-      console.log(`Stopping current project: ${this.activeProject.name}`);
-      this.activeProject.timeToday += Math.floor((Date.now() - this.activeProject.startTime) / 1000);
-      this.activeProject.startTime = null;
-    }
-    
-    const project = this.projects.find(p => p.id === projectId);
-    if (project) {
-      console.log(`Starting new project: ${project.name}`);
-      this.activeProject = project;
-      if (this.timer.isRunning()) {
-        project.startTime = Date.now();
-      }
-      this.renderProjects();
-      this.saveProjects();
-      this.triggerUpdate();
-      
-      setTimeout(() => this.verifySynchronization(), 100);
-    }
-  }
-
-  addProject(projectName) {
-    if (!projectName.trim()) return;
-    
-    const newProject = {
-      id: Date.now().toString(),
-      name: projectName.trim(),
-      color: CONFIG.PROJECT_COLORS[this.projects.length % CONFIG.PROJECT_COLORS.length],
-      timeToday: 0,
-      startTime: null
-    };
-    
-    this.projects.push(newProject);
-    this.renderProjects();
-    this.saveProjects();
-    console.log(`Added new project: ${projectName}`);
-  }
-
-  deleteProject(projectId) {
-    const projectToDelete = this.projects.find(p => p.id === projectId);
-    if (!projectToDelete || projectToDelete.name === CONFIG.DEFAULT_PROJECT.NAME) {
-      return;
-    }
-    
-    const projectName = projectToDelete.name;
-    if (!confirm(`Delete project "${projectName}"? Its time will be transferred to "${CONFIG.DEFAULT_PROJECT.NAME}".`)) {
-      return;
-    }
-    
-    const defaultProject = this.projects.find(p => p.name === CONFIG.DEFAULT_PROJECT.NAME);
-    if (defaultProject) {
-      const timeToTransfer = projectToDelete.timeToday + 
-        (projectToDelete.startTime ? Math.floor((Date.now() - projectToDelete.startTime) / 1000) : 0);
-      defaultProject.timeToday += timeToTransfer;
-    }
-    
-    if (this.activeProject && this.activeProject.id === projectId) {
-      this.activeProject = defaultProject;
-      if (this.timer.isRunning() && defaultProject) {
-        defaultProject.startTime = projectToDelete.startTime || Date.now();
-      }
-    }
-    
-    const projectIndex = this.projects.findIndex(p => p.id === projectId);
-    if (projectIndex !== -1) {
-      this.projects.splice(projectIndex, 1);
-    }
-    
-    this.renderProjects();
-    this.saveProjects();
-    this.triggerUpdate();
-    console.log(`Deleted project: ${projectName}`);
-  }
-
-  onTimerStart() {
-    if (this.activeProject) {
-      this.activeProject.startTime = this.timer.startTime;
-    }
-  }
-
-  onTimerPause() {
-    if (this.activeProject && this.activeProject.startTime) {
-      this.activeProject.timeToday += Math.floor((Date.now() - this.activeProject.startTime) / 1000);
-      this.activeProject.startTime = null;
-    }
-    this.saveProjects();
-    this.renderProjects();
-  }
-
-  onTimerReset() {
-    this.projects.forEach(project => {
-      project.timeToday = 0;
-      project.startTime = null;
-    });
-    
-    const defaultProject = this.projects.find(p => p.name === CONFIG.DEFAULT_PROJECT.NAME);
-    this.activeProject = defaultProject || null;
-    
-    this.saveProjects();
-    this.renderProjects();
-  }
-
-  onTimeAdjustment(seconds) {
-    if (this.activeProject) {
-      this.activeProject.timeToday += seconds;
-      if (this.activeProject.timeToday < 0) this.activeProject.timeToday = 0;
-    }
-    this.renderProjects();
-    this.verifySynchronization();
-  }
-
-  setupEventListeners() {
-    this.newProjectInput.addEventListener('keypress', (event) => {
-      if (event.key === 'Enter') {
-        this.addProject(event.target.value);
-        event.target.value = '';
-      }
-    });
-  }
-}
-
 // Timeline Class
 class Timeline {
-  constructor(timer, projectManager) {
+  constructor(timer) {
     this.timer = timer;
-    this.projectManager = projectManager;
     
     this.timelineBar = document.getElementById('timelineBar');
     this.timelineLabels = document.querySelector('.timeline-labels');
@@ -823,23 +391,19 @@ class Timeline {
   }
 
   saveCurrentSession() {
-    const activeProject = this.projectManager.activeProject;
-    if (!this.timer.startTime || !activeProject || !activeProject.startTime) return;
+    if (!this.timer.startTime) return;
     
-    const sessionStart = activeProject.startTime;
+    const sessionStart = this.timer.startTime;
     const sessionEnd = Date.now();
     
     if (sessionEnd - sessionStart > CONFIG.TIMELINE.MIN_SESSION_DURATION_MS) {
       const session = {
         start: sessionStart,
-        end: sessionEnd,
-        projectId: activeProject.id,
-        projectName: activeProject.name,
-        projectColor: activeProject.color
+        end: sessionEnd
       };
       
       StorageManager.addTimelineSession(session);
-      console.log(`Saved timeline session: ${activeProject.name} from ${Utils.formatDisplayTime(sessionStart)} to ${Utils.formatDisplayTime(sessionEnd)}`);
+      console.log(`Saved work session from ${Utils.formatDisplayTime(sessionStart)} to ${Utils.formatDisplayTime(sessionEnd)}`);
     }
   }
 
@@ -941,7 +505,7 @@ class Timeline {
         this.createTimelineSegment({
           leftPercent,
           widthPercent,
-          color: session.projectColor || '#28a745',
+          color: '#28a745',
           tooltip: this.createSessionTooltip(session),
           isCurrent: false
         });
@@ -950,13 +514,10 @@ class Timeline {
   }
 
   renderCurrentSession(timeRange) {
-    if (!this.timer.isRunning() || !this.projectManager.activeProject || !this.projectManager.activeProject.startTime) {
-      return;
-    }
+    if (!this.timer.isRunning()) return;
     
     const { timelineStart, timelineEnd, timelineDuration } = timeRange;
-    const currentProjectStart = this.projectManager.activeProject.startTime;
-    const currentStart = Math.max(currentProjectStart, timelineStart);
+    const currentStart = Math.max(this.timer.startTime, timelineStart);
     const currentEnd = Math.min(Date.now(), timelineEnd);
     
     if (currentStart < timelineEnd && currentEnd > timelineStart && currentStart < currentEnd) {
@@ -966,7 +527,7 @@ class Timeline {
       this.createTimelineSegment({
         leftPercent,
         widthPercent,
-        color: this.projectManager.activeProject.color,
+        color: '#28a745',
         tooltip: this.createCurrentSessionTooltip(currentStart, currentEnd),
         isCurrent: true
       });
@@ -1006,23 +567,18 @@ class Timeline {
     const startTimeStr = Utils.formatDisplayTime(session.start);
     const endTimeStr = Utils.formatDisplayTime(session.end);
     const duration = Utils.getDurationInMinutes(session.start, session.end);
-    const projectName = session.projectName || 'Unknown project';
-    
-    return `${startTimeStr} - ${endTimeStr} (${duration} Min.) - ${projectName}`;
+    return `${startTimeStr} - ${endTimeStr} (${duration} min.)`;
   }
 
   createCurrentSessionTooltip(start, end) {
     const startTimeStr = Utils.formatDisplayTime(start);
     const currentTimeStr = Utils.formatDisplayTime(end);
     const duration = Utils.getDurationInMinutes(start, end);
-    const projectName = this.projectManager.activeProject.name;
-    
-    return `${startTimeStr} - ${currentTimeStr} (${duration} Min.) - ${projectName} - Läuft gerade`;
+    return `${startTimeStr} - ${currentTimeStr} (${duration} min.) - In progress`;
   }
 
   onTimerPause() {
     this.saveCurrentSession();
-    this.updateTimeline();
   }
 
   onTimerReset() {
@@ -1030,10 +586,6 @@ class Timeline {
     this.updateTimeline();
   }
 
-  onProjectSwitch() {
-    this.saveCurrentSession();
-    setTimeout(() => this.updateTimeline(), 50);
-  }
 }
 
 // History Class
@@ -1102,23 +654,15 @@ class History {
 
 // UI Manager Class
 class UIManager {
-  constructor(timer, projectManager) {
+  constructor(timer) {
     this.timer = timer;
-    this.projectManager = projectManager;
     
     this.netAdjustmentsDisplay = document.getElementById('netAdjustments');
-    this.projectSumDisplay = document.getElementById('projectSum');
-    this.syncStatusDisplay = document.getElementById('syncStatus');
-    
-    this.setupEventListeners();
     this.updateDisplays();
   }
 
   updateDisplays() {
     this.updateNetAdjustmentsDisplay();
-    this.updateProjectSumDisplay();
-    this.updateSyncStatusDisplay();
-    this.projectManager.updateProjectTimers();
   }
 
   updateNetAdjustmentsDisplay() {
@@ -1127,92 +671,6 @@ class UIManager {
     this.netAdjustmentsDisplay.className = `net-time ${adjustmentsInfo.isPositive ? 'positive' : 'negative'}`;
   }
 
-  updateProjectSumDisplay() {
-    const totalProjectTime = this.projectManager.getTotalProjectTime();
-    this.projectSumDisplay.textContent = Utils.formatTime(totalProjectTime);
-  }
-
-  updateSyncStatusDisplay() {
-    const currentElapsed = this.timer.getCurrentElapsed();
-    const totalProjectTime = this.projectManager.getTotalProjectTime();
-    const difference = Math.abs(currentElapsed - totalProjectTime);
-    
-    if (difference <= 3) {
-      this.syncStatusDisplay.textContent = '✓ In Sync';
-      this.syncStatusDisplay.className = 'text-success';
-    } else {
-      this.syncStatusDisplay.textContent = `⚠ Off by ${difference}s`;
-      this.syncStatusDisplay.className = 'text-warning';
-    }
-  }
-
-  forceSynchronization() {
-    console.log('Manual synchronization requested');
-    
-    const mainTimerTime = this.timer.getCurrentElapsed();
-    const totalProjectTime = this.projectManager.getTotalProjectTime();
-    
-    console.log(`Before sync - Main: ${Utils.formatTime(mainTimerTime)}, Projects: ${Utils.formatTime(totalProjectTime)}, Diff: ${Math.abs(mainTimerTime - totalProjectTime)}s`);
-    
-    this.projectManager.syncToMainTimer();
-    this.updateDisplays();
-    
-    const newMainTimerTime = this.timer.getCurrentElapsed();
-    const newTotalProjectTime = this.projectManager.getTotalProjectTime();
-    
-    console.log(`After sync - Main: ${Utils.formatTime(newMainTimerTime)}, Projects: ${Utils.formatTime(newTotalProjectTime)}, Diff: ${Math.abs(newMainTimerTime - newTotalProjectTime)}s`);
-    
-    this.timer.saveToStorage();
-    this.projectManager.saveProjects();
-  }
-
-  debugTimelineData() {
-    const today = Utils.getTodayString();
-    const todayData = StorageManager.getTodayTimeline();
-    
-    console.log('=== Timeline Debug ===');
-    console.log(`Date: ${today}`);
-    console.log(`Saved sessions: ${todayData.length}`);
-    todayData.forEach((session, index) => {
-      const start = new Date(session.start).toLocaleTimeString();
-      const end = new Date(session.end).toLocaleTimeString();
-      const duration = Math.round((session.end - session.start) / 60000);
-      console.log(`  ${index + 1}: ${session.projectName} - ${start} to ${end} (${duration} min)`);
-    });
-    
-    const activeProject = this.projectManager.activeProject;
-    if (this.timer.isRunning() && activeProject && activeProject.startTime) {
-      const currentStart = new Date(activeProject.startTime).toLocaleTimeString();
-      const currentNow = new Date().toLocaleTimeString();
-      const currentDuration = Math.round((Date.now() - activeProject.startTime) / 60000);
-      console.log(`Current: ${activeProject.name} - ${currentStart} to ${currentNow} (${currentDuration} min) - RUNNING`);
-    }
-    console.log('=====================');
-  }
-
-  setupEventListeners() {
-    document.getElementById('syncBtn').addEventListener('click', () => {
-      this.forceSynchronization();
-    });
-
-    document.getElementById('debugBtn').addEventListener('click', () => {
-      this.debugTimelineData();
-    });
-
-    const projectsCollapse = document.getElementById('projectsCollapse');
-    const projectsToggleText = document.getElementById('projectsToggleText');
-    const projectsToggleIcon = document.getElementById('projectsToggleIcon');
-
-    projectsCollapse.addEventListener('show.bs.collapse', () => {
-      projectsToggleText.textContent = 'Hide Projects';
-      projectsToggleIcon.textContent = '▲';
-    });
-
-    projectsCollapse.addEventListener('hide.bs.collapse', () => {
-      projectsToggleText.textContent = 'Show Projects';
-      projectsToggleIcon.textContent = '▼';
-    });
-  }
 }
 
 // Main Application Class
@@ -1220,35 +678,19 @@ class WorkTimeTracker {
   constructor() {
     this.initializeModules();
     this.setupInterModuleCommunication();
-    this.performInitialSync();
     
     console.log('Work Time Tracker initialized successfully');
   }
 
   initializeModules() {
     this.timer = new Timer();
-    this.projectManager = new ProjectManager(this.timer);
-    this.timeline = new Timeline(this.timer, this.projectManager);
+    this.timeline = new Timeline(this.timer);
     this.history = new History();
-    this.uiManager = new UIManager(this.timer, this.projectManager);
+    this.uiManager = new UIManager(this.timer);
   }
 
   setupInterModuleCommunication() {
     this.timer.onUpdate(() => {
-      this.projectManager.updateProjectTimers();
-      this.uiManager.updateDisplays();
-      
-      const now = new Date();
-      if (now.getSeconds() % CONFIG.SYNC.AUTO_CORRECT_INTERVAL_SECONDS === 0) {
-        if (!this.projectManager.verifySynchronization()) {
-          console.log('Auto-correcting timer drift');
-          this.projectManager.syncToMainTimer();
-        }
-      }
-    });
-
-    this.projectManager.onUpdate(() => {
-      this.timeline.onProjectSwitch();
       this.uiManager.updateDisplays();
     });
 
@@ -1259,56 +701,32 @@ class WorkTimeTracker {
     const originalStart = this.timer.start.bind(this.timer);
     this.timer.start = () => {
       originalStart();
-      this.projectManager.onTimerStart();
+      this.timeline.updateTimeline();
       this.uiManager.updateDisplays();
     };
 
     const originalPause = this.timer.pause.bind(this.timer);
     this.timer.pause = () => {
-      if (!this.projectManager.verifySynchronization()) {
-        console.log('Correcting timer sync before pause');
-        this.projectManager.syncToMainTimer();
-      }
-      
       this.timeline.onTimerPause();
       originalPause();
-      this.projectManager.onTimerPause();
+      this.timeline.updateTimeline();
       this.uiManager.updateDisplays();
-      
-      this.projectManager.verifySynchronization();
     };
 
     const originalReset = this.timer.reset.bind(this.timer);
     this.timer.reset = () => {
-      if (!confirm("Reset today's time?")) return;
-      
+      if (!originalReset()) return;
       this.timeline.onTimerReset();
-      originalReset();
-      this.projectManager.onTimerReset();
       this.history.refresh();
-      this.timeline.updateTimeline();
       this.uiManager.updateDisplays();
     };
 
     const originalAdjustTime = this.timer.adjustTime.bind(this.timer);
     this.timer.adjustTime = (seconds) => {
       originalAdjustTime(seconds);
-      this.projectManager.onTimeAdjustment(seconds);
       this.history.refresh();
       this.uiManager.updateDisplays();
-      
-      this.projectManager.verifySynchronization();
     };
-  }
-
-  performInitialSync() {
-    setTimeout(() => {
-      if (!this.projectManager.verifySynchronization()) {
-        console.log('Initial synchronization correction needed');
-        this.projectManager.syncToMainTimer();
-        this.projectManager.renderProjects();
-      }
-    }, 500);
   }
 }
 

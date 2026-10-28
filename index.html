@@ -25,8 +25,6 @@
               <input type="number" id="manualMinutes" class="form-control" value="10" style="max-width: 80px;">
               <button id="addBtn" class="btn btn-outline-success">+ 10 Min</button>
               <button id="subtractBtn" class="btn btn-outline-danger">- 10 Min</button>
-              <button id="syncBtn" class="btn btn-outline-info" title="Force timer synchronization">⚡ Sync</button>
-              <button id="debugBtn" class="btn btn-outline-secondary" title="Debug timeline data">🔍 Debug</button>
             </div>
           </div>
 
@@ -36,24 +34,6 @@
             <div class="timeline-bar" id="timelineBar"></div>
             <div class="text-center mt-3">
               <div>Net Manual Adjustments: <span id="netAdjustments" class="net-time">+00:00</span></div>
-              <div class="small text-muted mt-1">
-                Project Sum: <span id="projectSum">00:00:00</span> | 
-                Sync Status: <span id="syncStatus" class="text-success">✓ In Sync</span>
-              </div>
-            </div>
-          </div>
-
-          <div class="projects-section">
-            <div class="text-center">
-              <button class="btn btn-outline-secondary mb-3" type="button" data-bs-toggle="collapse" data-bs-target="#projectsCollapse" aria-expanded="true" aria-controls="projectsCollapse">
-                <span id="projectsToggleText">Hide Projects</span>
-                <i id="projectsToggleIcon" class="ms-2">▲</i>
-              </button>
-            </div>
-            <div class="collapse show" id="projectsCollapse">
-              <h5 class="text-center mb-3">Projects</h5>
-              <div id="projectsList"></div>
-              <input type="text" id="newProjectInput" class="form-control new-project-input" placeholder="Add new project...">
             </div>
           </div>
 
