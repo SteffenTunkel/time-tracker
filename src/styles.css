@@ -437,10 +437,30 @@ input {
   border-radius: 2px;
   background: rgba(216, 255, 82, 0.62);
   box-shadow: 0 0 8px rgba(216, 255, 82, 0.3);
-  animation: selectionPulse 1.8s ease-in-out infinite;
   cursor: grab;
   pointer-events: auto;
   touch-action: none;
+}
+
+.timeline-selection-marker:hover {
+  animation: selectionPulse 1.8s ease-in-out infinite;
+}
+
+.timeline-selection-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 1;
+  width: 9px;
+  cursor: ew-resize;
+}
+
+.timeline-selection-handle-start {
+  left: 0;
+}
+
+.timeline-selection-handle-end {
+  right: 0;
 }
 
 .timeline-bar.is-dragging .timeline-selection-marker {

@@ -416,6 +416,8 @@ class Timeline {
     this.isDraggingSelection = false;
     this.dragTimeRange = null;
     this.dragPointerOffset = 0;
+    this.dragMode = null;
+    this.dragFixedTimestamp = null;
     this.dragMovedSelection = false;
     this.ignoreNextTimelineClick = false;
     
@@ -468,8 +470,7 @@ class Timeline {
       this.currentTimeRange = timeRange;
       this.renderTimelineLabels(timeRange);
       this.renderTimelineTicks(timeRange);
-      this.renderCompletedSessions(todayData, timeRange);
-      this.renderCurrentSession(timeRange);
+      this.renderSessions(todayData, timeRange);
     }
     
     this.renderSelectionMarker();
@@ -548,10 +549,14 @@ class Timeline {
     }
   }
 
-  renderCompletedSessions(todayData, timeRange) {
+  renderSessions(todayData, timeRange) {
     const { timelineStart, timelineEnd, timelineDuration } = timeRange;
-    
-    todayData.forEach(session => {
+    const currentSession = this.timer.isRunning()
+      ? { start: this.timer.startTime, end: Date.now() }
+      : null;
+    const sessions = this.mergeSessions(currentSession ? [...todayData, currentSession] : todayData);
+
+    sessions.forEach(session => {
       if (session.end <= timelineStart || session.start >= timelineEnd) return;
       
       const sessionStart = Math.max(session.start, timelineStart);
@@ -560,37 +565,19 @@ class Timeline {
       if (sessionStart < sessionEnd) {
         const leftPercent = ((sessionStart - timelineStart) / timelineDuration) * 100;
         const widthPercent = ((sessionEnd - sessionStart) / timelineDuration) * 100;
+        const isCurrent = currentSession && session.start < currentSession.end && session.end > currentSession.start;
         
         this.createTimelineSegment({
           leftPercent,
           widthPercent,
           color: '#43a77e',
-          tooltip: this.createSessionTooltip(session),
-          isCurrent: false
+          tooltip: isCurrent
+            ? this.createCurrentSessionTooltip(sessionStart, sessionEnd)
+            : this.createSessionTooltip(session),
+          isCurrent
         });
       }
     });
-  }
-
-  renderCurrentSession(timeRange) {
-    if (!this.timer.isRunning()) return;
-    
-    const { timelineStart, timelineEnd, timelineDuration } = timeRange;
-    const currentStart = Math.max(this.timer.startTime, timelineStart);
-    const currentEnd = Math.min(Date.now(), timelineEnd);
-    
-    if (currentStart < timelineEnd && currentEnd > timelineStart && currentStart < currentEnd) {
-      const leftPercent = ((currentStart - timelineStart) / timelineDuration) * 100;
-      const widthPercent = ((currentEnd - currentStart) / timelineDuration) * 100;
-      
-      this.createTimelineSegment({
-        leftPercent,
-        widthPercent,
-          color: '#43a77e',
-        tooltip: this.createCurrentSessionTooltip(currentStart, currentEnd),
-        isCurrent: true
-      });
-    }
   }
 
   createTimelineLabel(percent, text) {
@@ -651,14 +638,23 @@ class Timeline {
     });
 
     this.timelineBar.addEventListener('pointerdown', (event) => {
-      if (!event.target.closest('.timeline-selection-marker') || event.button !== 0) return;
+      const marker = event.target.closest('.timeline-selection-marker');
+      if (!marker || event.button !== 0) return;
 
       const bounds = this.timelineBar.getBoundingClientRect();
-      const markerLeft = Number.parseFloat(event.target.style.left) || 0;
+      const markerBounds = marker.getBoundingClientRect();
+      const resizeHandle = event.target.closest('.timeline-selection-handle');
+      const markerLeft = Number.parseFloat(marker.style.left) || 0;
       event.preventDefault();
       this.isDraggingSelection = true;
       this.dragTimeRange = this.currentTimeRange;
       this.dragPointerOffset = event.clientX - bounds.left - markerLeft;
+      this.dragMode = resizeHandle?.dataset.resizeEdge || 'move';
+      const markerStart = this.dragTimeRange.timelineStart
+        + ((markerBounds.left - bounds.left) / bounds.width) * this.dragTimeRange.timelineDuration;
+      const markerEnd = this.dragTimeRange.timelineStart
+        + ((markerBounds.right - bounds.left) / bounds.width) * this.dragTimeRange.timelineDuration;
+      this.dragFixedTimestamp = this.dragMode === 'start' ? markerEnd : markerStart;
       this.dragMovedSelection = false;
       this.timelineBar.classList.add('is-dragging');
       this.timelineBar.setPointerCapture(event.pointerId);
@@ -670,6 +666,38 @@ class Timeline {
       const bounds = this.timelineBar.getBoundingClientRect();
       const trackWidth = bounds.width;
       const { timelineStart, timelineDuration } = this.dragTimeRange;
+      const pointerPosition = Math.min(1, Math.max(0, (event.clientX - bounds.left) / trackWidth));
+      const pointerTimestamp = timelineStart + pointerPosition * timelineDuration;
+
+      if (this.dragMode === 'start' || this.dragMode === 'end') {
+        const nextSelection = this.dragMode === 'start'
+          ? Math.max(timelineStart, Math.min(
+            this.dragFixedTimestamp - 60000,
+            Math.round(pointerTimestamp / 60000) * 60000
+          ))
+          : this.selectedTimestamp;
+        const nextEnd = this.dragMode === 'end'
+          ? Math.min(timelineStart + timelineDuration, Math.max(
+            this.dragFixedTimestamp + 60000,
+            Math.round(pointerTimestamp / 60000) * 60000
+          ))
+          : this.dragFixedTimestamp;
+        const nextDuration = Math.max(1, Math.round((nextEnd - nextSelection) / 60000));
+        const selectionChanged = nextSelection !== this.selectedTimestamp;
+        const durationChanged = nextDuration !== this.getAdjustmentMinutes();
+
+        if (selectionChanged || durationChanged) {
+          this.dragMovedSelection = true;
+          this.adjustmentMinutesInput.value = String(nextDuration);
+          if (selectionChanged) {
+            this.selectAdjustmentTime(nextSelection);
+          } else {
+            this.updateTimeline();
+          }
+        }
+        return;
+      }
+
       const previewDuration = Math.min(this.getAdjustmentMinutes() * 60000, timelineDuration);
       const previewWidth = Math.min(trackWidth, Math.max(4, (previewDuration / timelineDuration) * trackWidth));
       const markerLeft = Math.max(0, Math.min(
@@ -690,6 +718,8 @@ class Timeline {
 
       this.isDraggingSelection = false;
       this.dragTimeRange = null;
+      this.dragMode = null;
+      this.dragFixedTimestamp = null;
       this.timelineBar.classList.remove('is-dragging');
       if (this.timelineBar.hasPointerCapture(event.pointerId)) {
         this.timelineBar.releasePointerCapture(event.pointerId);
@@ -756,6 +786,13 @@ class Timeline {
     marker.style.width = `${previewWidth}px`;
     marker.title = `${this.getAdjustmentMinutes()} min. from ${Utils.formatDisplayTime(this.selectedTimestamp)}`;
     marker.setAttribute('aria-hidden', 'true');
+    ['start', 'end'].forEach(edge => {
+      const handle = document.createElement('span');
+      handle.className = `timeline-selection-handle timeline-selection-handle-${edge}`;
+      handle.dataset.resizeEdge = edge;
+      handle.setAttribute('aria-hidden', 'true');
+      marker.appendChild(handle);
+    });
     this.timelineBar.appendChild(marker);
   }
 
